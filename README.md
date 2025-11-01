@@ -1,4 +1,4 @@
-# Stabiliser Programming Language (SPL & SPL++)
+# Stabiliser Quantum Programming Language (SPL & SPL++)
 
 SPL is a low-level, Clifford-centric language for stabiliser circuits and affine classical wiring.
 SPL++ is a higher-level language that compiles to SPL, adding structured control (classical and Pauli-quantum) and convenience syntax.
@@ -225,3 +225,131 @@ make test-splpp
 ## License
 
 TBD.
+
+---
+
+# SPL++ (high-level language)
+
+SPL++ adds functions, types, control, and a compiler that **lowers to SPL**.
+
+## Core ideas
+
+- **Types**: `Dit`, `Qdit`, `Bool`.
+- **Dimension**: `dim p;` sets the prime field \(\mathbb{F}_p\) for both classical and quantum arithmetic.
+- **Functions**:
+  - `fn main(args) { ... }` is the entry point. No return types.
+  - `@Kind fn Name(args) -> outs { ... }` declares a reusable routine.
+    - `Kind ∈ {Pauli, Cliffod, Linear, Nonlinear}` is a **capability** bound. The compiler checks it.
+    - Outputs are a comma list of `Dit`/`Qdit` types.
+- **Statements**:
+  - State: `init x;`, `init x = k;`, `qinit q;`, `qinit q = k;`, `qinit q = mixed;`, `meas q;`, `prep q;`
+  - Apply: `apply G(a, b, ...)` or with explicit outs `->`
+  - Quantum control: `qctrl c: apply X(t)` where `c: Qdit` is the quantum control. Target must be **Pauli**.
+  - Classical control: `cctrl c: apply X(t)` where `c: Dit` is the control. Target must be **Pauli**.
+  - Boolean and arithmetic: `let b: Bool = (a < 3 and not z); if b { ... } else { ... }`
+  - Utilities: `assert equal F G;`, `assert included F G;`, `print spl Teleport;`, `dagger U as U_d;`, `return vars;`
+- **Gates**:
+  - Unitary: `X, Z, S, F, T, CX, SWAP, MUL_k` (with integer parameter `k` for `MUL`).
+  - Classical transforms: `copy, sum, plusone, and`.
+- **Outs rule**: For **unitaries**, either omit outputs or set `outs == ins` in the same order. Non-unitaries must specify outputs.
+- **Measurement and preparation**: Use `meas q;` and `prep q;` statements, not as `apply`.
+
+## Kind and control constraints
+
+- `qctrl` only over **Pauli** targets. It yields a Clifford. Attempting `qctrl` over `@Clifford` rejects at compile time. fileciteturn1file0
+- `cctrl` over **Pauli** is Linear. `cctrl` over **Clifford** is marked Nonlinear for future work. fileciteturn1file0
+- Branching and `and` make a function **Nonlinear** by inference. fileciteturn1file0
+
+## Lowering to SPL
+
+The compiler expands:
+- Booleans via `init/copy/sum/plusone/and` only.
+- Gate applications directly into SPL `*= ...` or classical `= TRANSFORM * ...` with names preserved. fileciteturn1file2
+
+---
+
+## Examples: Teleportation in SPL and SPL++
+
+### Teleportation in **SPL**
+
+```spl
+context { in: qpit }
+
+% initialize registers
+qinit x
+qinit out
+
+% prepare Bell pair
+x *= F
+(x, out) *= CX
+
+% Bell measurement
+(in, x) *= CX
+in *= F
+
+% measure outcomes
+meas x       % i
+meas in      % j
+
+% corrections
+ctrlX x  out
+ctrlZ in out
+
+% clean ancillae
+disc in
+disc x
+```
+
+This denotes the **identity** relation from input `in` to output `out` over \(\mathbb{F}_p\) (tested in `test_spl_affine.py`). fileciteturn1file3
+
+### Teleportation in **SPL++**
+
+```spl
+dim 5;
+
+@Linear fn BellPair(a: Qdit, b: Qdit) -> Qdit, Qdit {
+    apply F(a);
+    apply CX(a, b);
+    return a, b;
+}
+
+@Linear fn Teleport(in: Qdit) -> Qdit {
+    qinit x;
+    qinit out;
+    apply BellPair(x, out);
+
+    apply CX(in, x);
+    apply F(in);
+
+    meas x;          // i
+    meas in;         // j
+
+    cctrl x:  apply X(out);
+    cctrl in: apply Z(out);
+
+    return out;
+}
+
+fn main() {
+    // Example: compile or assert against other specs
+    print spl Teleport;
+}
+```
+
+The compiler lowers `Teleport` to SPL equivalent to the SPL program above, subject to the outs rule and control constraints. fileciteturn1file1 fileciteturn1file2
+
+---
+
+## Using the compiler
+
+```python
+from splpp.parser.ast import parse_splpp
+from splpp.compiler.compiler import Compiler
+
+P = parse_splpp(open("teleportation.spl++").read())
+fns = {d.name: d for d in P.decls}
+comp = Compiler(P.dim or 5, fns=fns)
+spl_text = comp.compile_function_to_spl(fns["Teleport"])
+print(spl_text)
+```
+This emits SPL with a `context` block and body lines ready for the SPL interpreter. fileciteturn1file2

@@ -1,0 +1,40 @@
+dim 5;
+
+// Base Pauli
+@Pauli fn P1(t: Qdit) -> Qdit {
+    apply Z(t);
+    return t;
+}
+
+// Nested Pauli (calls P1)
+@Pauli fn P2(t: Qdit) -> Qdit {
+    apply X(t);
+    apply P1(t);
+    apply X(t);
+    return t;
+}
+
+// Classical control over nested @Pauli
+@Linear fn test_cctrl_nested() -> Qdit {
+    qinit t;          // target
+    init  b;          // classical control bit
+    cctrl b: apply P2(t);
+    return t;
+}
+
+// Quantum control over nested @Pauli
+@Linear fn test_qctrl_nested() -> Qdit {
+    qinit c;          // quantum control
+    qinit t;          // target
+    // put control into |1> so CX/CZ act
+    apply X(c);
+    qctrl c: apply P2(t);
+    return t;
+}
+
+// Optional: print compiled SPL for visual inspection
+fn main() {
+    print spl test_cctrl_nested;
+    print spl test_qctrl_nested;
+}
+

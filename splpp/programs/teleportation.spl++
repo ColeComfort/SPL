@@ -1,0 +1,40 @@
+dim 2;
+
+// Prepare a Bell pair |Φ+> from |0,0>
+@Linear fn prepare_bell() -> Qdit, Qdit {
+    qinit qb;
+    qinit qc;
+    apply F(qb);
+    apply CX(qb, qc);
+    return qb, qc;
+}
+
+// Bell-basis measurement on (qa, qb); returns classical dits (m0, m1)
+@Linear fn bell_measure(qa: Qdit, qb: Qdit) -> Dit, Dit {
+    apply CX(qa, qb);
+    apply F(qa);
+    meas qa;
+    meas qb;
+    return qa, qb;
+}
+
+// Classically controlled Pauli corrections on target
+@Linear fn pauli_correct(m0: Dit, m1: Dit, out: Qdit) -> Qdit {
+    cctrl m0: apply X(out);
+    cctrl m1: apply Z(out);
+    return out;
+}
+
+// Teleport 'in' to 'out'
+@Linear fn teleport(in: Qdit) -> Qdit {
+    apply prepare_bell() -> qb, qc;
+    apply bell_measure(in, qb) -> m0, m1;
+    apply pauli_correct(m0, m1, qc) -> out;
+    return out;
+}
+
+// Driver: print SPL for teleport
+fn main() {
+    print spl teleport;
+}
+

@@ -1,0 +1,64 @@
+% context: logical input x
+context { x: qpit }
+
+% --- ENCODER E ---
+qinit a
+qinit b
+qinit c
+qinit d
+a *= F ; a *= F ; a *= F
+b *= F ; b *= F ; b *= F
+c *= F ; c *= F ; c *= F
+d *= F ; d *= F ; d *= F
+(d, x) *= CX
+d *= S ; d *= S
+x *= F ; x *= F ; x *= F
+(c, d) *= CX
+(c, x) *= CX
+c *= S ; c *= S
+d *= S ; d *= S
+x *= S ; x *= S
+(b, x) *= CX
+(b, d) *= CX
+b *= S ; b *= S
+c *= F ; c *= F ; c *= F
+d *= F ; d *= F ; d *= F
+(a, b) *= CX
+(a, c) *= CX
+(a, x) *= CX
+b *= S ; b *= S
+c *= F ; c *= F ; c *= F
+x *= S ; x *= S
+a *= F ; a *= F ; a *= F
+
+% --- optional noise model here ---
+
+% --- SYNDROME EXTRACTION (via decoder + meas) ---
+% decoder D
+a *= F ; a *= F ; a *= F
+x *= S ; x *= S
+c *= F ; c *= F ; c *= F
+b *= S ; b *= S
+(a, x) *= CX ; (a, x) *= CX
+(a, c) *= CX ; (a, c) *= CX
+(a, b) *= CX ; (a, b) *= CX
+d *= F ; d *= F ; d *= F
+c *= F ; c *= F ; c *= F
+b *= S ; b *= S
+(b, d) *= CX ; (b, d) *= CX
+(b, x) *= CX ; (b, x) *= CX
+x *= S ; x *= S
+d *= S ; d *= S
+c *= S ; c *= S
+(c, x) *= CX ; (c, x) *= CX
+(c, d) *= CX ; (c, d) *= CX
+x *= F ; x *= F ; x *= F
+d *= S ; d *= S
+(d, x) *= CX ; (d, x) *= CX
+
+% measure ancillas to read syndrome
+meas a
+meas b
+meas c
+meas d
+

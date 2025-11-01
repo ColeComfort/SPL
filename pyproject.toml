@@ -1,0 +1,18 @@
+[project]
+name = "spl-toolkit"
+version = "0.0.1"
+description = "SPL and SPL++ interpreters and compilers"
+requires-python = ">=3.10"
+dependencies = ["lark>=1.1"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["spl", "splpp"]
+
+[project.scripts]
+spl-rel = "spl.scripts.spl_rel:main"
+splpp-rel = "splpp.scripts.splpp_rel:main"

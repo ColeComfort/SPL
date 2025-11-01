@@ -1,4 +1,4 @@
-# Stabiliser Quantum Programming Language (SPL & SPL++)
+# Stabiliser Programming Language (SPL & SPL++)
 
 SPL is a low-level, Clifford-centric language for stabiliser circuits and affine classical wiring.
 SPL++ is a higher-level language that compiles to SPL, adding structured control (classical and Pauli-quantum) and convenience syntax.

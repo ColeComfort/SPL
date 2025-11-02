@@ -104,8 +104,8 @@ x *= F
 in *= F
 
 % measure
-meas x       % i
-meas in      % j
+meas x       % outcome i
+meas in      % outcome j
 
 % corrections
 ctrlX x  out
@@ -117,7 +117,6 @@ disc x
 ```
 This denotes the identity relation from `in` to `out` over \(\mathbb{F}_p\).
 
----
 ---
 
 ## Compilation pipeline
@@ -132,6 +131,7 @@ High level to low level to semantics:
 
 Outcome: an explicitly printed relation with named coordinates. The domain is fixed by the SPL `context`. The range is built by SPL statements.
 
+---
 
 # SPL++ (separate language)
 
@@ -142,14 +142,14 @@ SPL++ is a **high-level** language with functions, kinds, control, and a compile
 ### Detailed syntax
 - **Dimension**: `dim p;` sets the prime field.
 - **Kinds (capabilities)** on functions restrict allowed constructs inside the body:
-  - `@Pauli` targets Pauli-only operations.
+  - `@Pauli` targets Pauli-only operations and Pauli subroutines.
   - `@Clifford` allows Clifford unitaries and Pauli controls.
   - `@Linear` allows affine classical transforms (`copy`, `sum`, `plusone`) and Pauli controls.
   - `@Nonlinear` permits `and`, boolean branching, or other non-affine constructs.
 - **Types**:
   - `Qdit` for quantum registers.
   - `Dit`  for classical registers in \(\mathbb{F}_p\).
-  - `Bool` for boolean guards; Booleans are implemented over dits using `init/copy/sum/plusone/and` when lowered.
+  - `Bool` for boolean guards; booleans lower to the classical primitives.
 - **Function forms**:
   - `@Kind fn Name(args) -> out_list { stmts }` returns an ordered list of variables.
   - `fn main() { stmts }` is the entry point. No return list.
@@ -157,73 +157,80 @@ SPL++ is a **high-level** language with functions, kinds, control, and a compile
   - `init x;` or `init x = k;` with `k ∈ \mathbb{F}_p`.
   - `qinit q;` or `qinit q = k;` or `qinit q = mixed;`.
   - `meas q;` converts `q: Qdit` to a classical `Dit`.
-  - `prep q;` prepares a fresh `Qdit` from classical data if supported.
+  - `prep q;` replaces a classical `Dit` by a fresh `Qdit` at the same name.
 - **Unitary application**:
-  - `apply G(t1, ..., tn);` with `G ∈ {X,Z,S,F,T,CX,SWAP,MUL_k}`.
-  - **Outs rule**: unitaries either omit outs or specify outs equal to ins in the same order; non-unitaries must specify explicit outs.
-- **Classical transforms**: `copy`, `sum`, `plusone`, `and` used via helper lowering for booleans and arithmetic.
+  - `apply G(a, b, ...);` with `G ∈ {X,Z,S, F, T, CX, SWAP, MUL_k}` as implemented.
+  - **Outs rule**: unitaries either omit outs or specify outs equal to ins in the same order; non-unitaries must specify outs.
+- **Classical transforms**: `copy`, `sum`, `plusone`, `and` occur via helper lowering.
 - **Control**:
-  - Classical control: `cctrl c: apply P(t);` where `c: Dit`, `P ∈ {X,Z}`. Target must be Pauli-compatible.
-  - Quantum control: `qctrl q: apply P(t);` where `q: Qdit`, `P ∈ {X,Z}` only. Rejects controls over non-Pauli targets.
+  - Classical control: `cctrl c: apply P(t);` where `c: Dit`, `P ∈ {X,Z}`. Compiles to `ctrlX/ctrlZ`.
+  - Quantum control: `qctrl q: apply P(t);` where `q: Qdit`, `P ∈ {X,Z}`. Compiles via `CX` and `F` as needed.
 - **Booleans and branching**:
   - `let b: Bool = ...; if b { ... } else { ... }` allowed in SPL++; the compiler lowers boolean ops to the classical primitives. Using `and` or branching forces Nonlinear kind.
-- **Assertions and utilities**:
-  - `assert ...;`, `print spl Name;`, `dagger U as U_d;`, `return ...;` as provided by the implementation.
+- **Utilities**:
+  - `assert equal F G;`, `assert included F G;`, `print spl Name;`, `dagger U as U_d;`, `return ...;`
 
-
-- Set dimension: `dim p;` for the prime field.
-- Kinds: `@Pauli`, `@Clifford`, `@Linear`, `@Nonlinear` annotate function capabilities checked by the compiler.
-- Types: `Dit`, `Qdit`, `Bool`.
-- Functions:
-  - `@Kind fn Name(args) -> outs { ... }`
-  - `fn main() { ... }` as entry point.
-- Statements:
-  - State: `init x;`, `qinit q;`, `meas q;`, `prep q;`
-  - Apply: `apply G(a, b, ...)` (with or without explicit outs for unitaries)
-  - Control: `cctrl c: apply X(t);`, `qctrl c: apply X(t);`
-  - Classical ops and booleans with `let`, arithmetic, and `if`.
-- Gates: `X, Z, S, F, T, CX, SWAP, MUL_k` and classical `copy, sum, plusone, and`.
-- **Outs rule**: Unitaries either omit outs or set `outs == ins`. Non-unitaries must specify outs.
-
-### Kind rules summary
-- `qctrl` is allowed only with **Pauli** targets. Attempts over `@Clifford` are rejected.
-- `cctrl` over Pauli is Linear. Using branching or `and` classifies a function as Nonlinear.
+---
 
 ## SPL++ example: Teleportation
 
-```splpp
-dim 5;
+```spl++
+dim 2;
 
-@Linear fn BellPair(a: Qdit, b: Qdit) -> Qdit, Qdit {
-    apply F(a);
-    apply CX(a, b);
-    return a, b;
+// Prepare a Bell pair |Φ+> from |0,0>
+@Linear fn prepare_bell() -> Qdit, Qdit {
+    qinit qb;
+    qinit qc;
+    apply F(qb);
+    apply CX(qb, qc);
+    return qb, qc;
 }
 
-@Linear fn Teleport(in: Qdit) -> Qdit {
-    qinit x;
-    qinit out;
-    apply BellPair(x, out);
+// Bell-basis measurement on (qa, qb); returns classical dits (m0, m1)
+@Linear fn bell_measure(qa: Qdit, qb: Qdit) -> Dit, Dit {
+    apply CX(qa, qb);
+    apply F(qa);
+    meas qa;
+    meas qb;
+    return qa, qb;
+}
 
-    apply CX(in, x);
-    apply F(in);
-
-    meas x;          // i
-    meas in;         // j
-
-    cctrl x:  apply X(out);
-    cctrl in: apply Z(out);
-
+// Classically controlled Pauli corrections on target
+@Linear fn pauli_correct(m0: Dit, m1: Dit, out: Qdit) -> Qdit {
+    cctrl m0: apply X(out);
+    cctrl m1: apply Z(out);
     return out;
 }
 
+// Teleport 'in' to 'out'
+@Linear fn teleport(in: Qdit) -> Qdit {
+    apply prepare_bell() -> qb, qc;
+    apply bell_measure(in, qb) -> m0, m1;
+    apply pauli_correct(m0, m1, qc) -> out;
+    return out;
+}
+
+// Driver: print SPL for teleport
 fn main() {
-    // compile or print SPL
-    // print spl Teleport;
+    print spl teleport;
 }
 ```
 
-The compiler lowers `Teleport` to SPL statements equivalent to the SPL program above.
+The compiler lowers `teleport` to SPL statements equivalent to the SPL program above.
+
+---
+
+## Implementation status
+
+### SPL
+- **Implemented**: `context`, `skip`, `init`, `qinit`, `meas`, `disc`/`discard`, gate application `*=`, classical transforms `copy/sum/plusone`, classical control `ctrlX/ctrlZ/ctrl P` (with `P∈{X,Z}`), affine interpreter, set interpreter.
+- **Not implemented**: non-Pauli `ctrl P`, multi-arity gates beyond `CX`, non-listed transforms.
+- **Notes**: `and` is rejected by the affine interpreter and triggers the set interpreter when present.
+
+### SPL++
+- **Implemented**: parsing of kinds/types, `init/qinit/meas/prep`, `apply` with or without outs, `cctrl` and `qctrl` over Pauli targets, `if` with boolean expressions, `assert`, `print spl`, `dagger as`, `return`, compiler lowering to SPL, assertions checked by interpreting the lowered SPL.
+- **Partially implemented / constraints**: `qctrl` and `cctrl` only over Pauli targets; attempting to control a non-Pauli or non-@Pauli function raises a compile-time error. Outs rule is enforced for unitaries by construction. Some library gates beyond those in the interpreters may not lower.
+- **Testing**: SPL++ is **not fully tested**. Use the provided examples and tests; report mismatches. The SPL level and affine tests are the current source of truth.
 
 ---
 
@@ -244,7 +251,7 @@ PYTHONPATH=. python -m spl.scripts.spl_rel path/to/program.spl
 
 ## Troubleshooting
 
-- **SPL parse errors**: check that you use `meas q` (no arrow), and only the listed primitives.
+- **SPL parse errors**: use only the primitives listed; `meas q` has no arrow.
 - **Backend mismatch**: using `and` forces set semantics.
 - **Gate parameters**: `MUL_k` uses `_k`, not exponent.
 - **Do not mix syntaxes**: `.spl` uses SPL syntax only. `.spl++` uses SPL++ syntax only.

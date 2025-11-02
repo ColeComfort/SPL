@@ -1,281 +1,97 @@
-# Stabiliser Quantum Programming Language (SPL & SPL++)
+# Stabiliser Quantum Programming Language (SPL)
 
-SPL is a low-level, Clifford-centric language for stabiliser circuits and affine classical wiring.
-SPL++ is a higher-level language that compiles to SPL, adding structured control (classical and Pauli-quantum) and convenience syntax.
+SPL is a **flat assembly** for stabiliser-style circuits and classical affine wiring. No functions. No branching. A program is an optional `context` followed by statements. The **domain** is fixed by the context and never changes; statements only append or transform **outputs**.
 
-Both ultimately **evaluate to relations**:
-
-- If a program uses only linear Clifford primitives and **no nonlinear classical control**, evaluation yields an **affine relation**.
-- If a program uses **nonlinear** classical control, evaluation yields a **set relation**.
-
-## Quick start
-
-```bash
-# Python 3.10+ recommended
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-
-# Run examples
-spl-rel spl/programs/5_1_3.spl
-splpp-rel splpp/programs/teleportation.spl++ --fn main
-
-# Or without installing (module mode)
-PYTHONPATH=. python -m spl.scripts.spl_rel spl/programs/5_1_3.spl
-PYTHONPATH=. python -m splpp.scripts.splpp_rel splpp/programs/teleportation.spl++ --fn main
-```
-
-## Using `make`
-
-A simple `Makefile` is included:
-
-```bash
-make venv       # create .venv
-make install    # pip install -e .
-make test       # run all tests (SPL and SPL++)
-make test-spl   # SPL tests only
-make test-splpp # SPL++ tests only
-make run-spl    # run example SPL program via CLI
-make run-splpp  # run example SPL++ program via CLI
-make clean      # remove caches/build artifacts
-```
-
-> The Makefile targets assume `python3` is available and use it by default.
-
-## Project layout
-
-```
-spl/
-  src/
-    parser/        # SPL grammar & parser
-      parser.py
-    interpreter/   # SPL interpreters
-      interpret_spl_affine.py
-      interpret_spl_sets.py
-      interpret_spl.py        # dispatches if needed
-    relations/
-      affine_relations.py
-      set_relations.py
-  programs/        # example .spl programs
-  tests/           # SPL tests
-  scripts/
-    spl_rel.py     # CLI entry: "spl-rel"
-
-splpp/
-  src/
-    parser/
-      ast.py       # SPL++ AST, grammar, transformer, parse_splpp
-    compiler/
-      compiler.py  # SPL++ -> SPL lowering (contains former typecheck / utils)
-    interpreter/
-      interp.py    # harness to compile & run via SPL interpreter
-    __init__.py    # lazy public API
-  programs/
-  tests/
-  scripts/
-    splpp_rel.py   # CLI entry: "splpp-rel"
-
-pyproject.toml     # package + console_scripts (spl-rel, splpp-rel)
-Makefile
-pytest.ini         # lets pytest run from repo root without install
-```
+> SPL++ is a separate high-level language with its own syntax and compiler. Do not mix syntax.
 
 ---
 
-## How the pipelines work
+## SPL model
 
-### SPL: direct interpretation
-```
-SPL source  --parse-->  SPL AST  --interpret_affine/sets-->  Relation
-                                      |
-                                      +-- affine (default) if no nonlinear control
-                                      +-- sets if nonlinear constructs encountered
-```
+- Field: prime field \(\mathbb{F}_p\) selected by the interpreter.
+- Context: names and kinds of **open inputs**.
+  - `pit`: classical wire, contributes 1 coordinate.
+  - `qpit`: quantum wire, contributes 2 coordinates `.x` and `.z`.
+- Statements operate on outputs only. Context fixes the input size.
 
-### SPL++: compile then interpret
-```
-SPL++ source  --parse_splpp-->  SPL++ AST  --compile-->  SPL text
-SPL text      --parse_spl-----> SPL AST   --interpret_affine/sets--> Relation
-```
-
-- **Affine relation** backend is used when the resulting SPL uses only linear Clifford + affine classical wiring.
-- **Set relation** backend is used when nonlinear classical control is exercised (e.g., branching by arbitrary classical predicates that don’t remain affine).
+The interpreter selects backend:
+- **Affine** backend if only affine classical primitives are used.
+- **Set** backend if any non-affine primitive is used, e.g. `and`.
 
 ---
 
-## Syntax cheat-sheet
+## SPL syntax
 
-### Global
-- **Dimension**: `dim 2;` (or any prime power you support)
-- **Types**: `Dit` (classical), `Qdit` (quantum)
-- **Function kinds**:
-  - `@Pauli`    — Pauli-only routines (no init/qinit/meas/prepare)
-  - `@Clifford` — Clifford routines (no non-Clifford ops; same purity rules)
-  - `@Linear`   — linear/affine classical functions
-  - `@Linear fn`, `@Clifford fn`, `@Pauli fn` all use SPL statements with admissibility enforced by kind.
-
-### SPL (core statements)
-
-```
-// Initialise / discard / measure
-init x;                 // classical Dit register (default 0, or "init x = p;")
-qinit q;                // quantum Qdit (default |0>, or "qinit q = |p>;")
-discard x;  disc x;     // discard classical
-meas q -> x;            // measure q into classical x
-
-// Apply gates
-q *= X;                 // unary gate
-q *= Z;
-x *= F;                 // classical linear op if defined
-(a,b) *= CX;            // binary gate; tuple on LHS for multi-arg ops
-
-// Affine classical assignment
-y = A * x;              // linear/affine step (matrix A over F_p)
-
-// Classical control
-ctrl b: q *= X;         // run block if bit b==1
-
-// Functions
-@Clifford fn bell(a: Qdit, b: Qdit) -> Qdit, Qdit { ... }
-@Linear   fn lin(a: Dit) -> Dit { ... }
-@Pauli    fn y(t: Qdit) -> Qdit { ... }
-
-return t;               // explicit returns allowed
+### Program
+```spl
+context { a: pit; q: qpit }   % optional
+stmt;
+stmt;
+...
 ```
 
-Constraints:
-- `init`, `qinit`, `meas`, `prepare` are **not** allowed inside `@Clifford` / `@Pauli` bodies if your purity rules forbid them (the compiler enforces).
-- Non-unitary ops must specify explicit outputs; unitary ops may omit or use identical outs == ins.
+- Without a context the domain is `0` and the program builds outputs only.
 
-### SPL++ (sugar + structured control)
-
-```
-@Clifford fn main() -> Qdit {
-  qinit t;
-  init b = 0;
-
-  # classical control on b
-  cctrl b: apply X(t);
-
-  # Pauli quantum control
-  @Pauli fn Y(u: Qdit) -> Qdit { apply Z(u); apply X(u); return u; }
-  qctrl t: apply Y(t);
-
-  return t;
-}
+### Statements
+```spl
+skip
+init x                 % add classical output x := 0
+qinit q                % add quantum outputs q.x := 0, q.z := 0
+disc x                 % remove outputs (alias: discard)
+discard x
+meas q                 % keep q.x, drop q.z, q becomes classical
+(x,y) *= CX^k          % apply gate
+t = sum * (x,y)        % classical transforms (see below)
+ctrlX c t              % classical control: add c into t.x
+ctrlZ c t              % classical control: add c into t.z
+ctrl P c t             % generic token; interpreter accepts P in {X,Z}
 ```
 
-Key constructs:
-- `apply G(args...) -> outs...;` — uniform call form for gates/routines
-- `cctrl b: <block>;`             — classical control (potentially nonlinear)
-- `qctrl q: <Pauli-routine>;`     — quantum control, **only** over `@Pauli` routines
-- Same `init/qinit/meas/discard` as SPL, with the same purity constraints by function kind.
+Notes:
+- `meas q` converts `q` in place. No arrow.
+- Register position is a name or a pair `(r1, r2)` for binary gates.
+- `disc` and `discard` are synonyms.
+
+### Gate atoms
+```
+IDENT                  % X, Z, S, F, T, CX
+IDENT^k                % exponent k ∈ ℤ
+MUL_k                  % parameter k for dilation (k in 𝔽_p^×)
+```
+
+### Classical transforms
+```
+y1,y2 = copy * x       % 1→2
+z    = sum  * (u,v)    % 2→1
+x    = plusone * x     % in-place increment mod p
+t    = and * (u,v)     % 2→1, non-affine → set backend
+```
+All named wires must already exist and be classical. Arity checks are strict.
 
 ---
 
-## CLIs
+## SPL operational semantics
 
-After installation (`pip install -e .`) you get two entry points:
+The environment maps variable names to **output coordinates**.
 
-```bash
-# Interpret an .spl program (prints a kernel-view of the relation)
-spl-rel spl/programs/5_1_3.spl
+- `init x`: append 1 coordinate, bind `x`.
+- `qinit q`: append 2 coordinates, bind `q.x`, `q.z`.
+- `meas q`: keep `q.x`, drop `q.z`, bind `q` to the remaining classical coordinate.
+- `disc x`: delete bound coordinates and reindex remaining outputs.
+- `ctrlX c q`: add classical `c` into `q.x` mod `p`.
+- `ctrlZ c q`: add classical `c` into `q.z` mod `p`.
+- Gates compose on outputs; inputs are those fixed by `context`.
 
-# Compile an .spl++ file, select function, then interpret as a relation
-splpp-rel splpp/programs/teleportation.spl++ --fn main
-```
-
-Without installing, use module mode:
-
-```bash
-PYTHONPATH=. python -m spl.scripts.spl_rel spl/programs/5_1_3.spl
-PYTHONPATH=. python -m splpp.scripts.splpp_rel splpp/programs/teleportation.spl++ --fn main
-```
+Affine backend composes affine relations. Set backend composes relations extensionally over tuples.
 
 ---
 
-## Testing
-
-```bash
-# All tests
-make test
-
-# Separate
-make test-spl
-make test-splpp
-```
-
-> If a test references an optional external package (e.g. `qdsl`) it is guarded and will be **skipped** when the dependency is missing.
-
----
-
-## Troubleshooting
-
-- **“No module named spl” / “No module named splpp”**
-  Either install (`pip install -e .`) or run with `PYTHONPATH=. python -m ...` as shown above.
-
-- **`Stmt` not defined (SPL++ parser)**
-  Ensure `splpp/src/parser/ast.py` defines `class Stmt` **before** any subclasses and the Lark `_ToAST` transformer appears **after** the AST classes; keep `from __future__ import annotations` at the very top.
-
-- **Interpretation call**
-  All SPL interpreters expect an SPL **program AST**: call `interpret(prog)` (not just `interpret()`).
-
----
-
-## License
-
-TBD.
-
----
-
-# SPL++ (high-level language)
-
-SPL++ adds functions, types, control, and a compiler that **lowers to SPL**.
-
-## Core ideas
-
-- **Types**: `Dit`, `Qdit`, `Bool`.
-- **Dimension**: `dim p;` sets the prime field \(\mathbb{F}_p\) for both classical and quantum arithmetic.
-- **Functions**:
-  - `fn main(args) { ... }` is the entry point. No return types.
-  - `@Kind fn Name(args) -> outs { ... }` declares a reusable routine.
-    - `Kind ∈ {Pauli, Cliffod, Linear, Nonlinear}` is a **capability** bound. The compiler checks it.
-    - Outputs are a comma list of `Dit`/`Qdit` types.
-- **Statements**:
-  - State: `init x;`, `init x = k;`, `qinit q;`, `qinit q = k;`, `qinit q = mixed;`, `meas q;`, `prep q;`
-  - Apply: `apply G(a, b, ...)` or with explicit outs `->`
-  - Quantum control: `qctrl c: apply X(t)` where `c: Qdit` is the quantum control. Target must be **Pauli**.
-  - Classical control: `cctrl c: apply X(t)` where `c: Dit` is the control. Target must be **Pauli**.
-  - Boolean and arithmetic: `let b: Bool = (a < 3 and not z); if b { ... } else { ... }`
-  - Utilities: `assert equal F G;`, `assert included F G;`, `print spl Teleport;`, `dagger U as U_d;`, `return vars;`
-- **Gates**:
-  - Unitary: `X, Z, S, F, T, CX, SWAP, MUL_k` (with integer parameter `k` for `MUL`).
-  - Classical transforms: `copy, sum, plusone, and`.
-- **Outs rule**: For **unitaries**, either omit outputs or set `outs == ins` in the same order. Non-unitaries must specify outputs.
-- **Measurement and preparation**: Use `meas q;` and `prep q;` statements, not as `apply`.
-
-## Kind and control constraints
-
-- `qctrl` only over **Pauli** targets. It yields a Clifford. Attempting `qctrl` over `@Clifford` rejects at compile time. fileciteturn1file0
-- `cctrl` over **Pauli** is Linear. `cctrl` over **Clifford** is marked Nonlinear for future work. fileciteturn1file0
-- Branching and `and` make a function **Nonlinear** by inference. fileciteturn1file0
-
-## Lowering to SPL
-
-The compiler expands:
-- Booleans via `init/copy/sum/plusone/and` only.
-- Gate applications directly into SPL `*= ...` or classical `= TRANSFORM * ...` with names preserved. fileciteturn1file2
-
----
-
-## Examples: Teleportation in SPL and SPL++
-
-### Teleportation in **SPL**
+## SPL example: Teleportation
 
 ```spl
 context { in: qpit }
 
-% initialize registers
+% ancillae
 qinit x
 qinit out
 
@@ -287,7 +103,7 @@ x *= F
 (in, x) *= CX
 in *= F
 
-% measure outcomes
+% measure
 meas x       % i
 meas in      % j
 
@@ -299,12 +115,37 @@ ctrlZ in out
 disc in
 disc x
 ```
+This denotes the identity relation from `in` to `out` over \(\mathbb{F}_p\).
 
-This denotes the **identity** relation from input `in` to output `out` over \(\mathbb{F}_p\) (tested in `test_spl_affine.py`). fileciteturn1file3
+---
 
-### Teleportation in **SPL++**
+# SPL++ (separate language)
 
-```spl
+SPL++ is a **high-level** language with functions, kinds, control, and a compiler that lowers programs to SPL. Its syntax is **different** from SPL.
+
+## SPL++ essentials
+
+- Set dimension: `dim p;` for the prime field.
+- Kinds: `@Pauli`, `@Clifford`, `@Linear`, `@Nonlinear` annotate function capabilities checked by the compiler.
+- Types: `Dit`, `Qdit`, `Bool`.
+- Functions:
+  - `@Kind fn Name(args) -> outs { ... }`
+  - `fn main() { ... }` as entry point.
+- Statements:
+  - State: `init x;`, `qinit q;`, `meas q;`, `prep q;`
+  - Apply: `apply G(a, b, ...)` (with or without explicit outs for unitaries)
+  - Control: `cctrl c: apply X(t);`, `qctrl c: apply X(t);`
+  - Classical ops and booleans with `let`, arithmetic, and `if`.
+- Gates: `X, Z, S, F, T, CX, SWAP, MUL_k` and classical `copy, sum, plusone, and`.
+- **Outs rule**: Unitaries either omit outs or set `outs == ins`. Non-unitaries must specify outs.
+
+### Kind rules summary
+- `qctrl` is allowed only with **Pauli** targets. Attempts over `@Clifford` are rejected.
+- `cctrl` over Pauli is Linear. Using branching or `and` classifies a function as Nonlinear.
+
+## SPL++ example: Teleportation
+
+```splpp
 dim 5;
 
 @Linear fn BellPair(a: Qdit, b: Qdit) -> Qdit, Qdit {
@@ -331,25 +172,33 @@ dim 5;
 }
 
 fn main() {
-    // Example: compile or assert against other specs
-    print spl Teleport;
+    // compile or print SPL
+    // print spl Teleport;
 }
 ```
 
-The compiler lowers `Teleport` to SPL equivalent to the SPL program above, subject to the outs rule and control constraints. fileciteturn1file1 fileciteturn1file2
+The compiler lowers `Teleport` to SPL statements equivalent to the SPL program above.
 
 ---
 
-## Using the compiler
+## Build and run
 
-```python
-from splpp.parser.ast import parse_splpp
-from splpp.compiler.compiler import Compiler
+```bash
+make venv
+make install
 
-P = parse_splpp(open("teleportation.spl++").read())
-fns = {d.name: d for d in P.decls}
-comp = Compiler(P.dim or 5, fns=fns)
-spl_text = comp.compile_function_to_spl(fns["Teleport"])
-print(spl_text)
+# Run SPL interpreter on a .spl file
+make run-spl FILE=examples/teleportation.spl
+
+# Or directly:
+PYTHONPATH=. python -m spl.scripts.spl_rel path/to/program.spl
 ```
-This emits SPL with a `context` block and body lines ready for the SPL interpreter. fileciteturn1file2
+
+---
+
+## Troubleshooting
+
+- **SPL parse errors**: check that you use `meas q` (no arrow), and only the listed primitives.
+- **Backend mismatch**: using `and` forces set semantics.
+- **Gate parameters**: `MUL_k` uses `_k`, not exponent.
+- **Do not mix syntaxes**: `.spl` uses SPL syntax only. `.spl++` uses SPL++ syntax only.

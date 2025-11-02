@@ -53,6 +53,13 @@ class SetRelation:
         outs = {j: (out_names.get(j, "") if out_names else "") for j in range(m)}
         return SetRelation(p, n, m, pairs, ins, outs)
 
+    @staticmethod
+    def from_affine(R) -> "SetRelation":
+        """
+        Convert an AffineRelation to a SetRelation by enumeration.
+        """
+        return R.to_set_relation()
+
     def compose(self, other: "SetRelation") -> "SetRelation":
         assert self.p == other.p and self.n_out == other.n_in
         p = self.p

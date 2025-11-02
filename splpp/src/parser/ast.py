@@ -116,16 +116,17 @@ dim_decl: "dim" INT ";"
 main_decl: "fn" "main" "(" params? ")" "{" stmt* "}"
 
 ann_fn_decl: "@" fntype "fn" IDENT "(" params? ")" "->" outtypes "{" stmt* "}"
+plain_fn_decl: "fn" IDENT "(" params? ")" "->" outtypes "{" stmt* "}"
 
 outtypes: ATOMICTYPE ("," ATOMICTYPE)*
-fn_decl: main_decl | ann_fn_decl
+fn_decl: main_decl | ann_fn_decl | plain_fn_decl
 
 params: param ("," param)*
 param: IDENT ":" ATOMICTYPE
 
 ATOMICTYPE: "Dit" | "Qdit" | "Bool"
 
-KIND: "Pauli" | "Clifford" | "Linear" | "Nonlinear"
+KIND: "Pauli" | "Clifford" | "Linear" | "Nonlinear" | "controlledclifford"
 fntype: KIND
 
 // ---------- statements ----------
@@ -366,6 +367,22 @@ class _ToAST(Transformer):
             elif isinstance(x, list): body.extend(y for y in x if isinstance(y, Stmt))
         return FnDecl(name, in_params, out_types, kind, body)
 
+    def plain_fn_decl(self, items):
+        name = str(items[0])
+        i = 1
+        in_params: List[Tuple[str,str]] = []
+        if i < len(items) and isinstance(items[i], list) and (not items[i] or isinstance(items[i][0], tuple)):
+            in_params = items[i]; i += 1
+        if i >= len(items) or not isinstance(items[i], list):
+            raise ValueError("function output types missing")
+        out_types: List[str] = items[i]; i += 1
+        body: List["Stmt"] = []
+        for x in items[i:]:
+            if isinstance(x, Stmt): body.append(x)
+            elif isinstance(x, list): body.extend(y for y in x if isinstance(y, Stmt))
+        # Unannotated function; compiler will enforce annotation policy
+        return FnDecl(name, in_params, out_types, None, body)
+
     # --- unambiguous apply/qctrl/cctrl builders ---
     def apply_with_outs(self, items):
         gate = items[0]
@@ -536,7 +553,7 @@ def _is_known_transform(name: str) -> bool:
 
 # ===================== KIND INFERENCE =====================
 
-_KIND_ORDER = ["Pauli","Clifford","Linear","Nonlinear"]
+_KIND_ORDER = ["Pauli","Clifford","Linear","Nonlinear","controlledclifford"]
 _KIND_POS = {k:i for i,k in enumerate(_KIND_ORDER)}
 _KIND_JOIN = {a:{b:_KIND_ORDER[max(_KIND_POS[a], _KIND_POS[b])] for b in _KIND_ORDER} for a in _KIND_ORDER}
 
@@ -587,7 +604,7 @@ class Compiler:
 
     def infer_required_kind(self, fn: FnDecl, seen: Optional[set]=None) -> str:
         if fn.kind is None:
-            return "Nonlinear"
+            raise TypeError(f"function '{fn.name}' must be annotated with a kind")
         seen = seen or set()
         if fn.name in seen:
             raise RecursionError(f"cyclic call graph not allowed in kind inference at {fn.name}")
@@ -649,7 +666,7 @@ class Compiler:
                 if tgt_kind == "Pauli":
                     join("Linear")
                 elif tgt_kind == "Clifford":
-                    join("Nonlinear")  # future implementation
+                    join("controlledclifford")
                 else:
                     raise TypeError(f"classical control over @{tgt_kind} not supported")
 
@@ -669,12 +686,27 @@ class Compiler:
 
         return req
 
+    
     def _check_declared_kind(self, fn: FnDecl):
         inferred = self.infer_required_kind(fn)
+        if fn.kind is None:
+            raise TypeError(f"function '{fn.name}' must be annotated")
+        # Early surface of illegal quantum control to match expected error semantics
+        for s in fn.body:
+            if isinstance(s, QCtrlApply):
+                gname = s.gate
+                if gname in self.fns and self.fns[gname].name != "main":
+                    tgt_kind = self.fns[gname].kind
+                elif _is_pauli_primitive(gname):
+                    tgt_kind = "Pauli"
+                else:
+                    tgt_kind = None
+                if tgt_kind == "Clifford":
+                    raise TypeError("quantum control over @Clifford is not supported")
+                if tgt_kind not in {"Pauli", None}:
+                    raise TypeError(f"quantum control over @{tgt_kind} not supported")
         if _KIND_POS[fn.kind] < _KIND_POS[inferred]:
-            return
-
-    # ---------- constant-fold simple bool/int for runtime 'if' selection ----------
+            raise TypeError(f"@{fn.kind} insufficient; requires @{inferred}")
 
     def eval_expr(self, e: Expr) -> Union[int,bool]:
         if isinstance(e, IntLit): return e.value
@@ -902,6 +934,37 @@ class Compiler:
 
     # ---- control lowering helpers ----
 
+    def _emit_ctrl_primitive(self, buf: SPLBuffer, ctrl_phys: str, gate_tok: str, tgt_phys: str):
+        g = gate_tok.upper()
+        if g in {"X","Z"}:
+            self._emit_ctrl_pauli_primitive(buf, ctrl_phys, g, tgt_phys)
+        else:
+            # Experimental non-Pauli classical control
+            buf.add(f"ctrl {gate_tok} {ctrl_phys} {tgt_phys}")
+
+    def _inline_ctrl_over_clifford_fn(self, env: 'Env', buf: 'SPLBuffer', ctrl_phys: str, callee: 'FnDecl', args: list[str]):
+        tmp = Env(dim=env.dim)
+        # bind params to same physical regs as args
+        for (pname, pty), aname in zip(callee.in_params, args):
+            vi = env.require(aname, expect=pty if pty != "Bool" else None)
+            tmp.declare(pname, pty, phys=vi.phys)
+        for st in callee.body:
+            if isinstance(st, Apply):
+                if st.gate in self.fns:
+                    sub = self.fns[st.gate]
+                    if sub.kind not in {"Pauli","Clifford"}:
+                        raise TypeError("only @Pauli/@Clifford may appear inside controlled @Clifford")
+                    self._inline_ctrl_over_clifford_fn(env, buf, ctrl_phys, sub, [a for a in st.args])
+                else:
+                    # primitive gate
+                    if len(st.args) != 1: raise TypeError("controlled primitive expects 1 target")
+                    tgt_phys = tmp.require(st.args[0]).phys
+                    self._emit_ctrl_primitive(buf, ctrl_phys, st.gate, tgt_phys)
+            else:
+                # Ignore non-apply inside controlled clifford body
+                continue
+
+
     def _emit_ctrl_pauli_primitive(self, buf: SPLBuffer, ctrl_phys: str, gate: str, tgt_phys: str):
         g = gate.upper()
         if g == "X": buf.add(f"ctrlX {ctrl_phys} {tgt_phys}")
@@ -1104,6 +1167,8 @@ class Compiler:
                         for a in s.args: env.require(a)
                         self._inline_unitary_noouts(env, buf, callee, s.args)
                     else:
+                        if fn_kind is not None and _KIND_POS[fn_kind] < _KIND_POS[callee.kind]:
+                            raise TypeError(f"calling @{callee.kind} from @{fn_kind} not allowed in {fn.name}")
                         self._inline_fn_call(env, buf, callee, s.args, s.outs, caller_kind=fn_kind)
                 else:
                     if not (_is_unitary_gate(s.gate) or _is_known_transform(s.gate)):
@@ -1113,7 +1178,6 @@ class Compiler:
                         for o in s.outs: env.require(o)
                     self._enforce_outs_rule(s.gate, s.args, s.outs)
                     self._emit_apply(env, buf, s.gate, s.args, s.outs)
-
             elif isinstance(s, QCtrlApply):
                 ensure_kind("Clifford", "quantum control")
                 ctrl_vi = env.require(s.ctrl, expect="Qdit")
@@ -1150,7 +1214,8 @@ class Compiler:
                         self._inline_ctrl_over_pauli_fn(env, buf, ctrl_phys, callee, s.args,
                                                         emit_ctrl=self._emit_ctrl_pauli_primitive)
                     elif callee.kind == "Clifford":
-                        raise TypeError("classically controlled @Clifford not available")
+                        ensure_kind("controlledclifford", "classically controlled @Clifford")
+                        self._inline_ctrl_over_clifford_fn(env, buf, ctrl_phys, callee, s.args)
                     else:
                         raise TypeError(f"classical control over @{callee.kind} not supported")
                 else:

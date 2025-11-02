@@ -1,0 +1,27 @@
+context { in: qpit }
+
+% initialize registers
+qinit x
+qinit out
+
+% prepare Bell pair
+x *= F
+(x, out) *= CX
+
+% Bell measurement (SUM then F^{-1} on 'in')
+(in, x) *= CX
+in *= F
+% in *= F
+% in *= F      % F^{-1} since F^4 = I
+
+% measure in Z basis
+meas x       % outcome i  (shift)
+meas in      % outcome j  (clock)
+
+% phase correction: apply X^i then Z^j
+ctrlX x  out
+ctrlZ in out
+
+% discard ancillae
+disc in
+disc x

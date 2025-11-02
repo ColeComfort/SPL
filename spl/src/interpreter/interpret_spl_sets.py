@@ -272,6 +272,7 @@ class EnvSets:
         else:
             raise ValueError(f"unknown classical transform '{transform}'")
 
+    
     def apply_ctrl(self, gate: str, c_name: str, q_name: str):
         gate = gate.upper()
         c = self.vars[c_name]; q = self.vars[q_name]
@@ -279,16 +280,46 @@ class EnvSets:
             raise ValueError("ctrl expects classical then quantum")
         c_idx = c.out_idxs[0]; x_idx, z_idx = q.out_idxs
         def upd(y):
+            k = y[c_idx] % self.p
             if gate in ("X","CTRLX"):
-                y[x_idx] = (y[x_idx] + y[c_idx]) % self.p
+                y[x_idx] = (y[x_idx] + k) % self.p
             elif gate in ("Z","CTRLZ"):
-                y[z_idx] = (y[z_idx] + y[c_idx]) % self.p
+                y[z_idx] = (y[z_idx] + k) % self.p
+            elif gate == "S":
+                # S^k: (x,z) -> (x, z + k*x)
+                y[z_idx] = (y[z_idx] + k * y[x_idx]) % self.p
+            elif gate == "F":
+                # F^k: multiply by F^k in SL(2,p): (x,z) -> (x,z) if k even? We implement k times F
+                k_mod = k % self.p
+                for _ in range(k_mod):
+                    x, z = y[x_idx], y[z_idx]
+                    y[x_idx], y[z_idx] = z % self.p, (-x) % self.p
+            elif gate.startswith("MUL"):
+                # Expect MUL_t or MUL_t^?; parse integer t
+                t = None
+                m = gate.split("_")
+                if len(m) == 2:
+                    try:
+                        t = int(m[1])
+                    except ValueError:
+                        t = None
+                if t is None:
+                    raise ValueError(f"unknown gate token for MUL: {gate}")
+                # Apply scaling x -> t^k * x, z -> (t^{-k}) * z
+                # Compute t^k mod p and its inverse
+                tk = pow(t, k, self.p)
+                # inverse of tk modulo p
+                inv = pow(tk, -1, self.p)
+                y[x_idx] = (tk * y[x_idx]) % self.p
+                y[z_idx] = (inv * y[z_idx]) % self.p
             else:
-                raise ValueError(f"unknown controlled Pauli '{gate}'")
+                raise ValueError(f"unknown controlled gate '{gate}'")
             return y
         self._pointwise_update(upd, self.current.output_names)
 
-def interpret_sets(p: int, prog: Program, context: Optional[Dict[str, str]] = None):
+
+
+def interpret(p: int, prog: Program, context: Optional[Dict[str, str]] = None):
     ctx = context if context is not None else getattr(prog, "context", None)
     n_in = 0
     ctx_order: List[Tuple[str,int]] = []
@@ -300,24 +331,20 @@ def interpret_sets(p: int, prog: Program, context: Optional[Dict[str, str]] = No
             elif ty == "qpit":
                 ctx_order.append((name, 2)); n_in += 2
             else:
-                raise ValueError(f"unknown context type for {name}: {ctx[name]}")
-    env = EnvSets(p, n_in, ctx_order)
+                raise ValueError("bad ctx type")
 
+    env = EnvSets(p, n_in, ctx_order)
     for s in prog.stmts:
         if isinstance(s, Skip):
-            continue
-        if isinstance(s, Init):
-            rs = s.reg if isinstance(s.reg, list) else [s.reg]
-            for r in rs: env.add_classical(r)
+            pass
+        elif isinstance(s, Init):
+            env.add_classical(s.reg if isinstance(s.reg, str) else s.reg[0])
         elif isinstance(s, QInit):
-            rs = s.reg if isinstance(s.reg, list) else [s.reg]
-            for r in rs: env.add_quantum(r)
+            env.add_quantum(s.reg if isinstance(s.reg, str) else s.reg[0])
         elif isinstance(s, Meas):
-            rs = s.reg if isinstance(s.reg, list) else [s.reg]
-            for r in rs: env.measure(r)
+            env.measure(s.reg if isinstance(s.reg, str) else s.reg[0])
         elif isinstance(s, Discard):
-            rs = s.reg if isinstance(s.reg, list) else [s.reg]
-            for r in rs: env.drop_var(r)
+            env.drop_var(s.reg if isinstance(s.reg, str) else s.reg[0])
         elif isinstance(s, ApplyGate):
             regs = s.reg if isinstance(s.reg, list) else [s.reg]
             env.apply_quantum_gate(s.gate, regs)
@@ -335,3 +362,5 @@ def interpret_sets(p: int, prog: Program, context: Optional[Dict[str, str]] = No
             raise NotImplementedError(type(s))
     return env, env.current
 
+def interpret_sets(p, prog, context=None):
+    return interpret(p, prog, context)

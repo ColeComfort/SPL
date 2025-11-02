@@ -1,43 +1,60 @@
+# Makefile for SPL / SPL++
+# Usage variables
 PY ?= python3
+PIP ?= $(PY) -m pip
 
-# Simple workflow
-.PHONY: help venv install dev test test-spl test-splpp run-spl run-splpp clean
+# Virtualenv
+VENV = .venv
+ACT = . $(VENV)/bin/activate &&
+
+.PHONY: help venv install dev test test-spl test-splpp run-spl run-splpp clean distclean
 
 help:
-	@echo "make venv       # create venv .venv"
-	@echo "make install    # pip install -e ."
-	@echo "make dev        # install dev deps"
-	@echo "make test       # run all tests"
-	@echo "make test-spl   # run SPL tests"
-	@echo "make test-splpp # run SPL++ tests"
-	@echo "make run-spl    # run CLI on example SPL"
-	@echo "make run-splpp  # run CLI on example SPL++"
-	@echo "make clean      # remove build and cache"
+	@echo "Targets:"
+	@echo "  make venv        Create venv in $(VENV)"
+	@echo "  make install     Editable install into venv"
+	@echo "  make dev         Install dev deps"
+	@echo "  make test        Run all tests"
+	@echo "  make test-spl    Run SPL tests"
+	@echo "  make test-splpp  Run SPL++ tests"
+	@echo "  make run-spl     Run SPL CLI example"
+	@echo "  make run-splpp   Run SPL++ CLI example (assertions in main)"
+	@echo "  make clean       Remove caches"
+	@echo "  make distclean   Remove venv + caches"
 
-venv:
-	$(PY) -m venv .venv
-	. .venv/bin/activate && $(PY) -m pip install --upgrade pip
+$(VENV)/bin/python:
+	$(PY) -m venv $(VENV)
+	$(ACT) $(PIP) install -U pip setuptools wheel
 
-install:
-	. .venv/bin/activate && $(PY) -m pip install -e .
+venv: $(VENV)/bin/python
+
+install: venv
+	$(ACT) $(PIP) install -e .
 
 dev: install
-	. .venv/bin/activate && $(PY) -m pip install pytest
+	$(ACT) $(PIP) install -U pytest
 
-test:
-	. .venv/bin/activate && $(PY) -m pytest -q spl/tests splpp/tests
+test: test-spl test-splpp
 
-test-spl:
-	. .venv/bin/activate && $(PY) -m pytest -q spl/tests
+test-spl: 
+	$(ACT) $(PY) -m pytest -q spl/tests
 
-test-splpp:
-	. .venv/bin/activate && $(PY) -m pytest -q splpp/tests
+test-splpp: 
+	$(ACT) $(PY) -m pytest -q splpp/tests
 
-run-spl:
-	. .venv/bin/activate && spl-rel spl/programs/5_1_3.spl
+run-spl: 
+	$(ACT) spl-rel spl/programs/teleportation.spl
 
-run-splpp:
-	. .venv/bin/activate && splpp-rel splpp/programs/teleportation.spl++ --fn main
+# Note: splpp-rel now runs run_assertions_via_spl when --fn main, so this works.
+run-splpp: 
+	$(ACT) splpp-rel splpp/programs/teleportation.spl++ --fn main
 
 clean:
 	rm -rf build dist *.egg-info .pytest_cache .mypy_cache **/__pycache__
+
+distclean: clean
+	rm -rf $(VENV)
+
+
+test-verbose: install
+	$(ACT) $(PY) -m pytest -vv -s

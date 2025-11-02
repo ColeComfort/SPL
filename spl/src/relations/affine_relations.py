@@ -580,6 +580,37 @@ class AffineRelation:
 
 
 # ---------- minimal demo ----------
+    def to_set_relation(self) -> "SetRelation":
+        """
+        Enumerate this affine relation as a SetRelation, preserving names.
+        """
+        from spl.src.relations.set_relations import SetRelation  # local import to avoid cycles
+        p = self.p
+        n = self.n_in
+        m = self.n_out
+        B = self.subspace.basis
+        d = n + m
+        r = len(B[0]) if B else 0
+        cols = [[B[i][j] % p for i in range(d)] for j in range(r)] if r>0 else []
+        shift = [v % p for v in self.subspace.shift]
+        pairs = set()
+        # iterate parameters
+        def prod(pv, rdim):
+            if rdim == 0:
+                yield []
+                return
+            from itertools import product
+            for t in product(range(pv), repeat=rdim):
+                yield list(t)
+        for t in prod(p, r):
+            vec = shift[:]
+            for j in range(r):
+                for i in range(d):
+                    vec[i] = (vec[i] + t[j]*cols[j][i]) % p
+            x = tuple(vec[:n]); y = tuple(vec[n:])
+            pairs.add((x,y))
+        return SetRelation(p, n, m, pairs, dict(self.input_names), dict(self.output_names))
+
 if __name__ == "__main__":
     # Example over p=5: relation R: x->y defined as y = x + 1  (as an affine subspace in F_5^2)
     p = 5

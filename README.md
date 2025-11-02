@@ -255,3 +255,8 @@ PYTHONPATH=. python -m spl.scripts.spl_rel path/to/program.spl
 - **Backend mismatch**: using `and` forces set semantics.
 - **Gate parameters**: `MUL_k` uses `_k`, not exponent.
 - **Do not mix syntaxes**: `.spl` uses SPL syntax only. `.spl++` uses SPL++ syntax only.
+
+
+## Verbose tests
+
+Run `make test-verbose` or `. .venv/bin/activate && python -m pytest -vv -s`.

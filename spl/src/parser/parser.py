@@ -57,6 +57,10 @@ GRAMMAR = r"""
 
     COMMENT: "%" /[^\n]*/
     %ignore COMMENT
+
+// Accept MATLAB-style % line comments as separators
+COMMENT_PCT: "%" /[^\n]*/
+%ignore COMMENT_PCT
 """
 
 # ===================== AST DEFINITIONS =====================
@@ -309,13 +313,10 @@ def pretty(stmt) -> str:
         return f"ctrl{stmt.pauli} {_pp_reg(stmt.ctrl)} {_pp_reg(stmt.target)}"
     return repr(stmt)
 
-def pretty_program(p: 'Program') -> str:
     lines: List[str] = []
     if p.context:
-        lines.append("context {")
-        for k, v in p.context.items():
-            lines.append(f"  {k}: {v}")
-        lines.append("}")
+        pairs = [f"{k}: {v}" for k, v in p.context.items()]
+        lines.append("context { " + "; ".join(pairs) + " }")
     lines.extend(pretty(s) for s in p.stmts)
     return ";\n".join(lines)
 

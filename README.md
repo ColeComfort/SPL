@@ -10,7 +10,7 @@ When nonlinear operations are not used, this produces relation which uniquely de
 
 > SPL++ is a separate high-level language with its own syntax. SPL++ compiles into SPL code. Experimental and not well-tested.
 
----
+---p
 
 ## SPL model
 
@@ -79,7 +79,7 @@ CX^k                   % Classically controlled X^k gate for k ∈ ℤ, supports
 
 ### Quantum-classical operations
 ```spl
-meas q                 % measures quantum register q in Pauli basis and turns q into a classical register
+meas q                 % measures quantum register q in standard basis and turns q into a classical register
 ctrlX c t              % classically controlled Pauli X from classical register c onto quantum register t
 ctrlZ c t              % classically controlled Pauli X from classical register c onto quantum register t
 ctrl P c t             % classically controlled Pauli P from classical register c onto quantum register t, where P ∈ {Z, X}

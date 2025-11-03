@@ -10,8 +10,6 @@ When nonlinear operations are not used, this produces relation which uniquely de
 
 > SPL++ is a separate high-level language with its own syntax. SPL++ compiles into SPL code. Experimental and not well-tested.
 
----p
-
 ## SPL model
 
 - Field: prime field F_p selected by the interpreter.

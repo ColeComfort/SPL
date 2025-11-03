@@ -1,7 +1,10 @@
 # Stabiliser Quantum Programming Language (SPL)
 
-SPL is an environment consuming assembly language for Clifford operations, with classically controlled Pauli operations, Pauli basis states, and classical control. Affine classical control is efficient, but nonlinear classical control is not.
-When only affine classical control is used, this produces a relation which uniquely determines a completely positive trace-preserving map between finite-dimensional C*-algebras.
+SPL is an environment consuming assembly language for Clifford operations, with classically controlled Pauli operations, Pauli basis state preparation, and classical control.
+
+Affine classical control is efficient, but nonlinear classical control is not.
+
+When nonlinear operations are not used, this produces relation which uniquely determines a completely positive trace-preserving map between finite-dimensional C*-algebras.
 
 > SPL++ is a separate high-level language with its own syntax. SPL++ compiles into SPL code. Experimental and not well-tested.
 

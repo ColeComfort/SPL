@@ -1,90 +1,108 @@
-# Stabiliser Quantum Programming Language (SPL)
+# Stabiliser Programming Language (SPL)
 
-SPL is a **flat assembly** for stabiliser-style circuits and classical affine wiring. No functions. No branching. A program is an optional `context` followed by statements. The **domain** is fixed by the context and never changes; statements only append or transform **outputs**.
+This repository provides an implementation of the language and denotational semantics introduced in the paper *“Denotational Semantics for Stabiliser Quantum Programs”* by Robert I. Booth and Cole Comfort.
 
-> SPL++ is a separate high-level language with its own syntax and compiler. Do not mix syntax.
+SPL is an environment consuming assembly language for Clifford operations, with classically controlled Pauli operations, Pauli basis state preparation, and classical control.
 
----
+Affine classical control is efficient, but nonlinear classical control is not.
+
+When nonlinear operations are not used, this produces relation which uniquely determines a completely positive trace-preserving map between finite-dimensional C*-algebras.  Otherwise, this produces a set relation which determines the *possible* Puali measurement outcomes.
+
+> SPL++ is a separate high-level language with its own syntax. SPL++ compiles into SPL code. Experimental and not well-tested.
 
 ## SPL model
 
-- Field: prime field \(\mathbb{F}_p\) selected by the interpreter.
-- Context: names and kinds of **open inputs**.
-  - `pit`: classical wire, contributes 1 coordinate.
-  - `qpit`: quantum wire, contributes 2 coordinates `.x` and `.z`.
-- Statements operate on outputs only. Context fixes the input size.
-
-The interpreter selects backend:
-- **Affine** backend if only affine classical primitives are used.
-- **Set** backend if any non-affine primitive is used, e.g. `and`.
-
+- Field: prime field F_p selected by the interpreter.
+- Registers are strings with quantum or classical types, denoted  `string : type`. There are two types:
+  - `pit`: classical type
+  - `qpit`: quantum type
 ---
 
 ## SPL syntax
 
-### Program
+### Program Structure
+
+Spl programs consist of an optional context followed by statements delimited by semicolons:
+
 ```spl
-context { a: pit; q: qpit }   % optional
-stmt;
-stmt;
+context { a: pit; q: qpit } 
+stmt; stmt; ...
+```
+
+Or using newlines:
+
+```spl
+context { a: pit
+          q: qpit } 
+stmt
+stmt
 ...
 ```
 
-- Without a context the domain is `0` and the program builds outputs only.
+### Context
 
-### Statements
+Context is optional and is declared by 
 ```spl
-skip
-init x                 % add classical output x := 0
-qinit q                % add quantum outputs q.x := 0, q.z := 0
-disc x                 % remove outputs (alias: discard)
-discard x
-meas q                 % keep q.x, drop q.z, q becomes classical
-(x,y) *= CX^k          % apply gate
-t = sum * (x,y)        % classical transforms (see below)
-ctrlX c t              % classical control: add c into t.x
-ctrlZ c t              % classical control: add c into t.z
-ctrl P c t             % generic token; interpreter accepts P in {X,Z}
+context { ... }
 ```
 
-Notes:
-- `meas q` converts `q` in place. No arrow.
-- Register position is a name or a pair `(r1, r2)` for binary gates.
-- `disc` and `discard` are synonyms.
+The context consists of a list of variables with their types, ie.  `a: pit` or `q: qpit` delimited by semicolons or newlines.
 
-### Gate atoms
-```
-IDENT                  % X, Z, S, F, T, CX
-IDENT^k                % exponent k ∈ ℤ
-MUL_k                  % parameter k for dilation (k in 𝔽_p^×)
+### Quantum operations
+```spl
+qinit x                % Initialises quantum register in state |0>
+x     *= G             % Applies single qupit quantum gate G to register x
+(x,y) *= G             % Applies two qupit quantum gate G to registers x and y
 ```
 
-### Classical transforms
+Quantum operations act on quantum registers and do not produce new registers.
+
+### Supported quantum gates
+The quantum gates which are available generate the Clifford operations:
+
+Single qupit quantum gates:
 ```
-y1,y2 = copy * x       % 1→2
-z    = sum  * (u,v)    % 2→1
-x    = plusone * x     % in-place increment mod p
-t    = and * (u,v)     % 2→1, non-affine → set backend
+IDENT                  % X, Z, S, F, T (Pauli X, Pauli Z, phase shift gate S, Fourier transform F)
+IDENT^k                % exponent k ∈ ℤ, supports exponents in brackets, ie. {-k} or {k}.
+MUL_k                  % multiplies classical basis elements by k
 ```
-All named wires must already exist and be classical. Arity checks are strict.
 
----
+Two qupit quantum gates:
+```
+CX                     % Classically ontrolled X gate
+CX^k                   % Classically controlled X^k gate for k ∈ ℤ, supports exponents in brackets, ie. {-k} or {k}.
+```
 
-## SPL operational semantics
+### Quantum-classical operations
+```spl
+meas q                 % measures quantum register q in standard basis and turns q into a classical register
+ctrlX c t              % classically controlled Pauli X from classical register c onto quantum register t
+ctrlZ c t              % classically controlled Pauli X from classical register c onto quantum register t
+ctrl P c t             % classically controlled Pauli P from classical register c onto quantum register t, where P ∈ {Z, X}
+```
 
-The environment maps variable names to **output coordinates**.
+Classically controlled operations do not consume the classical register.
 
-- `init x`: append 1 coordinate, bind `x`.
-- `qinit q`: append 2 coordinates, bind `q.x`, `q.z`.
-- `meas q`: keep `q.x`, drop `q.z`, bind `q` to the remaining classical coordinate.
-- `disc x`: delete bound coordinates and reindex remaining outputs.
-- `ctrlX c q`: add classical `c` into `q.x` mod `p`.
-- `ctrlZ c q`: add classical `c` into `q.z` mod `p`.
-- Gates compose on outputs; inputs are those fixed by `context`.
+Measurement consumes the quantum register and makes it classical.
 
-Affine backend composes affine relations. Set backend composes relations extensionally over tuples.
+### Experimental classical controlled clifford
+```spl
+ctrl G c t             % Classically controlled clifford where G ∈ {S, F, T, CX}. NONLINEAR and slow to interpret
+```
 
----
+### Classical operations
+```spl
+skip                      % nothing operation
+init x                    % initialise classical register x with value 0
+disc x                    % discard classical register x
+(y,z)   = copy * x        % copies register x into registers y and z
+z       = sum  * (x,y)    % sums registers x and y into register z
+y       = plusone * x     % sets register y to x+1 mod p
+z       = and * (x,y)     % sets register z to the product of registers x and y. NONLINEAR and slow to interpret
+```
+
+Classical operations consume classical input registers and produce new classical registers
+
 
 ## SPL example: Teleportation
 
@@ -115,7 +133,8 @@ ctrlZ in out
 disc in
 disc x
 ```
-This denotes the identity relation from `in` to `out` over \(\mathbb{F}_p\).
+
+This is interpreted as identity relation from `in` to `out`.
 
 ---
 
@@ -123,59 +142,24 @@ This denotes the identity relation from `in` to `out` over \(\mathbb{F}_p\).
 
 High level to low level to semantics:
 
-1. **SPL++** source. High-level functions, types, and controls.
-2. **Compiler** lowers to **SPL**. The result is a flat sequence with an optional `context`.
-3. **Interpreter** evaluates SPL as a relation over \(\mathbb{F}_p\):
+1. **SPL++** source. High-level functions, types, and controls (EXPERIMENTAL AND NOT WELL-TESTED).
+2. **Compiler** lowers **SPL++** to **SPL**.
+3. **Interpreter** transforms SPL programs into relations. Needs to be provided with a prime number for the dimension.
    - Uses the **Affine** backend if every classical operation is affine.
-   - Uses the **Set** backend only if a non-affine primitive occurs (e.g., `and` or explicit nonlinear branching). The set backend is slower and is avoided when affine suffices.
+   - If there are a mix of affine and nonlinear operations, the interpreter chunks SPL code into segments consisting of affine relations, and set functions. Then the chunks are interpreted separately. If there are affine chunks and nonlinear functions mixed together, they are cast into set relations then composed as set-relations. The goal is to minimize set relation composition to lower the computational complexity.
 
-Outcome: an explicitly printed relation with named coordinates. The domain is fixed by the SPL `context`. The range is built by SPL statements.
-
----
-
-# SPL++ (separate language)
-
-SPL++ is a **high-level** language with functions, kinds, control, and a compiler that lowers programs to SPL. Its syntax is **different** from SPL.
-
-## SPL++ essentials
-
-### Detailed syntax
-- **Dimension**: `dim p;` sets the prime field.
-- **Kinds (capabilities)** on functions restrict allowed constructs inside the body:
-  - `@Pauli` targets Pauli-only operations and Pauli subroutines.
-  - `@Clifford` allows Clifford unitaries and Pauli controls.
-  - `@Linear` allows affine classical transforms (`copy`, `sum`, `plusone`) and Pauli controls.
-  - `@Nonlinear` permits `and`, boolean branching, or other non-affine constructs.
-- **Types**:
-  - `Qdit` for quantum registers.
-  - `Dit`  for classical registers in \(\mathbb{F}_p\).
-  - `Bool` for boolean guards; booleans lower to the classical primitives.
-- **Function forms**:
-  - `@Kind fn Name(args) -> out_list { stmts }` returns an ordered list of variables.
-  - `fn main() { stmts }` is the entry point. No return list.
-- **State statements**:
-  - `init x;` or `init x = k;` with `k ∈ \mathbb{F}_p`.
-  - `qinit q;` or `qinit q = k;` or `qinit q = mixed;`.
-  - `meas q;` converts `q: Qdit` to a classical `Dit`.
-  - `prep q;` replaces a classical `Dit` by a fresh `Qdit` at the same name.
-- **Unitary application**:
-  - `apply G(a, b, ...);` with `G ∈ {X,Z,S, F, T, CX, SWAP, MUL_k}` as implemented.
-  - **Outs rule**: unitaries either omit outs or specify outs equal to ins in the same order; non-unitaries must specify outs.
-- **Classical transforms**: `copy`, `sum`, `plusone`, `and` occur via helper lowering.
-- **Control**:
-  - Classical control: `cctrl c: apply P(t);` where `c: Dit`, `P ∈ {X,Z}`. Compiles to `ctrlX/ctrlZ`.
-  - Quantum control: `qctrl q: apply P(t);` where `q: Qdit`, `P ∈ {X,Z}`. Compiles via `CX` and `F` as needed.
-- **Booleans and branching**:
-  - `let b: Bool = ...; if b { ... } else { ... }` allowed in SPL++; the compiler lowers boolean ops to the classical primitives. Using `and` or branching forces Nonlinear kind.
-- **Utilities**:
-  - `assert equal F G;`, `assert included F G;`, `print spl Name;`, `dagger U as U_d;`, `return ...;`
+Outcome: an relation and a dictionary indexing the input and output registers.  Quantum registers `a` are split in two `a.x` and `a.z`. Classical registers names are unchanged. The domain is fixed by the SPL `context`. The range is inferred.
 
 ---
+
+# SPL++
+
+SPL++ is an **experimental**, not-well-tested,  **high-level** language with functions, kinds, control, and a compiler that lowers programs to SPL.
 
 ## SPL++ example: Teleportation
 
 ```spl++
-dim 2;
+dim 3;
 
 // Prepare a Bell pair |Φ+> from |0,0>
 @Linear fn prepare_bell() -> Qdit, Qdit {
@@ -216,32 +200,13 @@ fn main() {
 }
 ```
 
-The compiler lowers `teleport` to SPL statements equivalent to the SPL program above.
-
----
-
-## Implementation status
-
-### SPL
-- **Implemented**: `context`, `skip`, `init`, `qinit`, `meas`, `disc`/`discard`, gate application `*=`, classical transforms `copy/sum/plusone`, classical control `ctrlX/ctrlZ/ctrl P` (with `P∈{X,Z}`), affine interpreter, set interpreter.
-- **Not implemented**: non-Pauli `ctrl P`, multi-arity gates beyond `CX`, non-listed transforms.
-- **Notes**: `and` is rejected by the affine interpreter and triggers the set interpreter when present.
-
-### SPL++
-- **Implemented**: parsing of kinds/types, `init/qinit/meas/prep`, `apply` with or without outs, `cctrl` and `qctrl` over Pauli targets, `if` with boolean expressions, `assert`, `print spl`, `dagger as`, `return`, compiler lowering to SPL, assertions checked by interpreting the lowered SPL.
-- **Partially implemented / constraints**: `qctrl` and `cctrl` only over Pauli targets; attempting to control a non-Pauli or non-@Pauli function raises a compile-time error. Outs rule is enforced for unitaries by construction. Some library gates beyond those in the interpreters may not lower.
-- **Testing**: SPL++ is **not fully tested**. Use the provided examples and tests; report mismatches. The SPL level and affine tests are the current source of truth.
-
----
-
 ## Build and run
 
 ```bash
-make venv
 make install
 
 # Run SPL interpreter on a .spl file
-make run-spl FILE=examples/teleportation.spl
+make run-spl FILE=spl/programs/teleportation.spl
 
 # Or directly:
 PYTHONPATH=. python -m spl.scripts.spl_rel path/to/program.spl

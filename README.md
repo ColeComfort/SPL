@@ -71,7 +71,7 @@ Measurement consumes the quantum register and makes it classical.
 
 ### Experimental classical controlled clifford
 ```spl
-ctrl G c t             % Classically controlled clifford where G ∈ {S, F, T, CX}
+ctrl G c t             % Classically controlled clifford where G ∈ {S, F, T, CX}. NONLINEAR and slow to interpret
 ```
 
 ### Classical operations
@@ -79,10 +79,10 @@ ctrl G c t             % Classically controlled clifford where G ∈ {S, F, T, C
 skip                      % nothing operation
 init x                    % add classical output x := 0
 disc x                    % discard classical register x
-(y1,y2) = copy * x        % copies register x into registers y1 and y2
-z       = sum  * (u,v)    % sums registers u and v into register x
+(x,z) = copy * x          % copies register x into registers y and z
+z       = sum  * (x,y)    % sums registers x and y into register z
 y       = plusone * x     % sets register y to x+1 mod p
-t       = and * (u,v)     % sets register t to the product of registers u and v. NONLINEAR and slow to interpret
+z       = and * (x,y)     % sets register z to the product of registers x and y. NONLINEAR and slow to interpret
 ```
 
 Classical operations consume classical input registers and produce new classical registers

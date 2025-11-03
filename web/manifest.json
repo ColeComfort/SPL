@@ -1,0 +1,18 @@
+{
+  "files": [
+    { "url": "../spl/__init__.py", "vm": "/spl/__init__.py" },
+    { "url": "../spl/src/__init__.py", "vm": "/spl/src/__init__.py" },
+
+    { "url": "../spl/src/parser/parser.py", "vm": "/spl/src/parser/parser.py" },
+
+    { "url": "../spl/src/interpreter/interpret_spl.py", "vm": "/spl/src/interpreter/interpret_spl.py" },
+    { "url": "../spl/src/interpreter/interpret_spl_functions.py", "vm": "/spl/src/interpreter/interpret_spl_functions.py" },
+    { "url": "../spl/src/interpreter/interpret_spl_affine.py", "vm": "/spl/src/interpreter/interpret_spl_affine.py" },
+    { "url": "../spl/src/interpreter/interpret_spl_sets.py", "vm": "/spl/src/interpreter/interpret_spl_sets.py" },
+
+    { "url": "../spl/src/relations/affine_relations.py", "vm": "/spl/src/relations/affine_relations.py" },
+    { "url": "../spl/src/relations/set_relations.py", "vm": "/spl/src/relations/set_relations.py" },
+    { "url": "../spl/src/relations/set_functions.py", "vm": "/spl/src/relations/set_functions.py" }
+  ]
+}
+

@@ -58,3 +58,8 @@ distclean: clean
 
 test-verbose: install
 	$(ACT) $(PY) -m pytest -vv -s
+	
+	
+	
+run-splpp-test: 
+	$(ACT) splpp-rel splpp/programs/test.spl++ --fn main

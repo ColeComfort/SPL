@@ -8,7 +8,7 @@ SPL is a **flat assembly** for stabiliser-style circuits and classical affine wi
 
 ## SPL model
 
-- Field: prime field \(\mathbb{F}_p\) selected by the interpreter.
+- Field: prime field F_p selected by the interpreter.
 - Registers are strings with quantum or classical types, denoted  `string : type`. There are two types:
   - `pit`: classical type
   - `qpit`: quantum type

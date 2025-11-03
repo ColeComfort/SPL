@@ -1,4 +1,4 @@
-# Stabiliser Quantum Programming Language (SPL)
+# Stabiliser Programming Language (SPL)
 
 This repository provides an implementation of the language and denotational semantics introduced in the paper *“Denotational Semantics for Stabiliser Quantum Programs”* by Robert I. Booth and Cole Comfort.
 

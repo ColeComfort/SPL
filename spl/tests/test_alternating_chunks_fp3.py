@@ -3,7 +3,7 @@ from spl.src.parser import parser as spl_parser
 from spl.src.interpreter.interpret_spl import interpret as interpret_spl
 
 SRC = """
-context { u: Dit; v: Dit }
+context { u: pit; v: pit }
 init a; init b;
 b = sum * (a, v);
 qinit c;

@@ -13,8 +13,6 @@ When only affine classical control is used, this produces a relation which uniqu
 - Registers are strings with quantum or classical types, denoted  `string : type`. There are two types:
   - `pit`: classical type
   - `qpit`: quantum type
-- Context: Optional list of open registers with types contained in parentheses, delimited by semicolons, eg. `context { a: pit; q: qpit }`
-
 ---
 
 ## SPL syntax
@@ -27,27 +25,37 @@ stmt;
 ...
 ```
 
-Context is optional and is used to generate relations with inputs, rather than states. Comments are given by %.
-
-### Quantum gates
+### Context
+Context is optional and is declared by 
+```spl
+context { registers with types, delimited by semicolons }
 ```
-IDENT                  % X, Z, S, F, T, CX
-IDENT^k                % exponent k ∈ ℤ, supports exponents in brackets, ie. {-k} or {k}.r
-MUL_k                  % multiplies classical basis elements by k
-```
-
 
 ### Quantum operations
 ```spl
 qinit q                % Initialises quantum register in state |0>
-(x,y) *= CX            % apply controlled X gate from register x to register y
-(x,y) *= CX^k          % apply controlled X^k gate from register x to register y, where k ∈ ℤ
-ctrlX c t              % classical control: add c into t.x
-ctrlZ c t              % classical control: add c into t.z
-ctrl P c t             % generic token; interpreter accepts P in {X,Z}
+x     *= G             % Applies single qupit quantum gate G to register x
+(x,y) *= G             % Applies two qupit quantum gate G to registers x and y
 ```
 
-Quantum operations act on quantum registers and do not produce new registers
+Quantum operations act on quantum registers and do not produce new registers.
+
+### Supported quantum gates
+The quantum gates which are available generate the Clifford operations:
+
+Single qupit quantum gates:
+```
+IDENT                  % X, Z, S, F, T (Pauli X, Pauli Z, phase shift gate S, Fourier transform F)
+IDENT^k                % exponent k ∈ ℤ, supports exponents in brackets, ie. {-k} or {k}.
+MUL_k                  % multiplies classical basis elements by k
+```
+
+Two qupit quantum gates:
+```
+CX                     % Classically ontrolled X gate
+CX^k                   % Classically controlled X^k gate for k ∈ ℤ, supports exponents in brackets, ie. {-k} or {k}.
+MUL_k                  % multiplies classical basis elements by k ∈ ℤ,
+```
 
 ### Quantum-classical operations
 ```spl
@@ -58,13 +66,13 @@ ctrl P c t             % classically controlled Pauli P from classical register 
 ```
 
 Classically controlled operations do not consume the classical register.
-Measurement consumes the quantum register and makes it classical
+
+Measurement consumes the quantum register and makes it classical.
 
 ### Experimental classical controlled clifford
 ```spl
 ctrl G c t             % generic token; interpreter also accepts G ∈ {S, F, T, CX}
 ```
-
 
 ### Classical operations
 ```spl

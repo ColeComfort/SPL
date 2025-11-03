@@ -1,6 +1,6 @@
 # Stabiliser Quantum Programming Language (SPL)
 
-SPL is a **flat assembly** for stabiliser-style circuits and classical affine wiring. No functions. No branching. A program is an optional `context` followed by statements. The **domain** is fixed by the context and never changes; statements only append or transform **outputs**.
+SPL is a **flat assembly** for stabiliser-style circuits and classical affine wiring. No functions. No branching. A program is an optional `context` followed by statements. The **domain** is fixed by the context and never changes; statements only append or transform **outputs**. Programs are interpreted as affine relations, set relations or set functions. Affine relations and set functions are preferred, because they can be computed tractably.
 
 > SPL++ is a separate high-level language with its own syntax and compiler. Experimental and not well-tested
 
@@ -9,14 +9,10 @@ SPL is a **flat assembly** for stabiliser-style circuits and classical affine wi
 ## SPL model
 
 - Field: prime field \(\mathbb{F}_p\) selected by the interpreter.
-- Context: names and kinds of **open inputs**.
-  - `pit`: classical wire, contributes 1 coordinate.
-  - `qpit`: quantum wire, contributes 2 coordinates `.x` and `.z`.
-- Statements operate on outputs only. Context fixes the input size.
-
-The interpreter selects backend:
-- **Affine** backend if only affine classical primitives are used.
-- **Set** backend if any non-affine primitive is used, e.g. `and`.
+- Registers are strings with quantum or classical types, denoted  `string : type`. There are two types:
+  - `pit`: classical type
+  - `qpit`: quantum type
+- Context: Optional list of open registers with types contained in parentheses, delimited by semicolons, eg. `context { a: pit; q: qpit }`
 
 ---
 

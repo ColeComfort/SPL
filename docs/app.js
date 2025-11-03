@@ -1,5 +1,5 @@
-// app.js — loads spl-run.pyz then overlays /spl/src/... from manifest.json if present.
-// Directly binds to spl.src.interpreter.interpret_spl.interpret(p, prog). Sends errors to #log.
+// app.js — robust loader with cache-bust, overlay, namespace merge, and sys.modules purge
+// Assumes: dist zip has no spl/__init__.py or spl/src/__init__.py
 
 const outEl     = document.getElementById("out");
 const logEl     = document.getElementById("log");
@@ -11,153 +11,93 @@ const toastEl   = document.getElementById("toast");
 const primeEl   = document.getElementById("prime") || document.getElementById("odd prime");
 const statusEl  = document.getElementById("status");
 
-let pyodide = null;
-let bootDone = false;
-
-function append(el, txt) {
-  if (!el || txt == null) return;
-  el.textContent += String(txt) + "\n";
-  el.scrollTop = el.scrollHeight;
-}
-function clear(el) { if (el) el.textContent = ""; }
-function toast(msg, ms = 3500) {
-  if (!toastEl) return;
-  toastEl.textContent = msg;
-  toastEl.style.display = "block";
-  clearTimeout(toastEl._t);
-  toastEl._t = setTimeout(() => { toastEl.style.display = "none"; }, ms);
-}
-
-(function installGlobalErrorHandlers(){
-  window.addEventListener("error", (ev) => {
-    append(logEl, `[JS Error] ${ev.message}\n${ev.filename}:${ev.lineno}:${ev.colno}`);
-    if (ev.error && ev.error.stack) append(logEl, ev.error.stack);
-  });
-  window.addEventListener("unhandledrejection", (ev) => {
-    append(logEl, `[Promise Rejection] ${ev.reason}`);
-    try { append(logEl, ev.reason && ev.reason.stack); } catch {}
-  });
-  const orig = { log: console.log, warn: console.warn, error: console.error };
-  console.log  = (...a) => { orig.log(...a);  append(logEl, a.join(" ")); };
-  console.warn = (...a) => { orig.warn(...a); append(logEl, "[warn] " + a.join(" ")); };
-  console.error= (...a) => { orig.error(...a);append(logEl, "[error] " + a.join(" ")); };
+function append(el, txt){ if(el && txt!=null){ el.textContent += String(txt)+"\n"; el.scrollTop = el.scrollHeight; } }
+function clear(el){ if(el) el.textContent=""; }
+function toast(msg, ms=3000){ if(!toastEl) return; toastEl.textContent=msg; toastEl.style.display="block"; clearTimeout(toastEl._t); toastEl._t=setTimeout(()=>toastEl.style.display="none",ms); }
+(function(){ const o={log:console.log,warn:console.warn,error:console.error};
+  console.log=(...a)=>{o.log(...a);append(logEl,a.join(" "));};
+  console.warn=(...a)=>{o.warn(...a);append(logEl,"[warn] "+a.join(" "));};
+  console.error=(...a)=>{o.error(...a);append(logEl,"[error] "+a.join(" "));};
+  window.addEventListener("error",e=>append(logEl,`[JS Error] ${e.message}\n${e.filename}:${e.lineno}:${e.colno}`));
+  window.addEventListener("unhandledrejection",e=>append(logEl,`[Promise Rejection] ${e.reason}`));
 })();
 
-async function loadBinary(path) {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
-  return new Uint8Array(await res.arrayBuffer());
-}
-async function loadText(path) {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
-  return await res.text();
-}
+let pyodide=null, bootDone=false;
+async function safePy(code){ try{ return await pyodide.runPythonAsync(code); }catch(e){ append(logEl,"[Python Error] "+String(e)); throw e; } }
+async function loadBinary(u){ const r=await fetch(u,{cache:"no-store"}); if(!r.ok) throw new Error(`HTTP ${r.status} for ${u}`); return new Uint8Array(await r.arrayBuffer()); }
+async function loadText(u){ const r=await fetch(u,{cache:"no-store"}); if(!r.ok) throw new Error(`HTTP ${r.status} for ${u}`); return r.text(); }
 
-async function safePy(code) {
-  try { return await pyodide.runPythonAsync(code); }
-  catch (e) {
-    append(logEl, "[Python Error] " + String(e));
-    throw new Error(String(e));
+async function overlayFromManifest(){
+  const r = await fetch("./manifest.json",{cache:"no-store"}); if(!r.ok) return false;
+  const m = await r.json(); if(!m.files || !Array.isArray(m.files)) return false;
+  for(const f of m.files){
+    const t = await (await fetch(f.url,{cache:"no-store"})).text();
+    const parts = f.vm.split("/").filter(Boolean); let cur="";
+    for(let i=0;i<parts.length-1;i++){ cur+="/"+parts[i]; try{ pyodide.FS.mkdir(cur);}catch{} }
+    pyodide.FS.writeFile(f.vm, t);
   }
+  await safePy(`import sys\nfor p in ("/","/spl","/spl/src"): sys.path.insert(0,p) if p not in sys.path else None`);
+  append(logEl,"[overlay] manifest applied");
+  return true;
 }
 
-async function maybeOverlayFromManifest() {
-  try {
-    const res = await fetch("./manifest.json", { cache: "no-store" });
-    if (!res.ok) return false;
-    const manifest = await res.json();
-    if (!manifest.files || !Array.isArray(manifest.files)) return false;
-    for (const f of manifest.files) {
-      const url = f.url;
-      const vm  = f.vm;
-      const txt = await (await fetch(url, { cache: "no-store" })).text();
-      // ensure dirs
-      const parts = vm.split("/").filter(Boolean);
-      let cur = "";
-      for (let i = 0; i < parts.length - 1; i++) {
-        cur += "/" + parts[i];
-        try { pyodide.FS.mkdir(cur); } catch {}
-      }
-      pyodide.FS.writeFile(vm, txt);
-    }
-    // put root paths
-    await safePy(`import sys\nfor p in ("/", "/spl", "/spl/src"): (p in sys.path) or sys.path.append(p)`);
-    append(logEl, "[overlay] manifest.json applied over zipapp");
-    return true;
-  } catch (e) {
-    append(logEl, "[overlay] manifest overlay failed: " + (e && e.message ? e.message : String(e)));
-    return false;
-  }
-}
-
-async function boot() {
-  try {
-    if (location.protocol === "file:") {
-      throw new Error("Serve via HTTP (e.g., GitHub Pages).");
-    }
-    if (versionEl) versionEl.textContent = new URL(location.href).href;
-
-    statusEl && (statusEl.textContent = "loading Python…");
+async function boot(){
+  try{
     pyodide = await loadPyodide();
-    pyodide.setStdout({ batched: (s) => append(outEl, s) });
-    pyodide.setStderr({ batched: (s) => append(logEl, s) });
+    pyodide.setStdout({batched:s=>append(outEl,s)});
+    pyodide.setStderr({batched:s=>append(logEl,s)});
+    versionEl && (versionEl.textContent = `Pyodide ${pyodide.version}`);
 
-    statusEl && (statusEl.textContent = "mounting zipapp…");
-    const zipBytes = await loadBinary("./spl-run.pyz");
-    pyodide.FS.writeFile("/spl-run.pyz", zipBytes, { canOwn: true });
-    await safePy(`import sys\nsys.path.insert(0, "/spl-run.pyz")`);
+    statusEl && (statusEl.textContent="mounting zip…");
+    const zip = await loadBinary("./spl-run.pyz?v="+Date.now());
+    pyodide.FS.writeFile("/spl-run.pyz", zip, {canOwn:true});
+    await safePy(`import sys\nsys.path.insert(0,"/spl-run.pyz")`);
 
-    statusEl && (statusEl.textContent = "verifying deps…");
-    await safePy(`
-import importlib
-try:
-    importlib.import_module("lark")
-except Exception:
-    import micropip
-    await micropip.install("lark>=1.1,<2")
-`);
-
-    // Try to import now; if missing modules, apply overlay then retry.
-    statusEl && (statusEl.textContent = "binding runner…");
-    let bound = false;
-    try {
-      await bindRunner();
-      bound = true;
-    } catch (e) {
-      append(logEl, "[bind] initial import failed, trying manifest overlay… " + (e && e.message ? e.message : String(e)));
-      const ok = await maybeOverlayFromManifest();
-      if (ok) {
-        await bindRunner();
-        bound = true;
-      } else {
-        throw e;
-      }
+    statusEl && (statusEl.textContent="binding…");
+    let bound=false;
+    try{
+      await bindRunner(false);
+      bound=true;
+    }catch(e){
+      append(logEl,"[bind] failed, applying overlay and purging… "+(e.message||e));
+      await overlayFromManifest();
+      await bindRunner(true);
+      bound=true;
     }
 
-    // Load example
-    try {
-      srcEl.value = await loadText("./teleportation.spl");
-      toast("Loaded teleportation example.", 1600);
-    } catch {}
-
+    try{ srcEl.value = await loadText("./teleportation.spl"); }catch{}
     bootDone = bound;
     statusEl && (statusEl.textContent = bound ? "ready" : "error");
-    if (runBtn)  runBtn.disabled = !bound;
-    if (loadBtn) loadBtn.disabled = !bound;
-  } catch (e) {
-    statusEl && (statusEl.textContent = "boot error");
-    append(logEl, "[Boot Error] " + (e && e.message ? e.message : String(e)));
-    outEl && (outEl.textContent = "Boot failed:\n" + (e && e.message ? e.message : String(e)));
-    toast("Boot failed. See Errors.", 4000);
+    if(runBtn) runBtn.disabled=!bound;
+    if(loadBtn) loadBtn.disabled=!bound;
+  }catch(e){
+    statusEl && (statusEl.textContent="boot error");
+    append(logEl,"[Boot Error] "+(e && e.message? e.message:String(e)));
+    outEl && (outEl.textContent = "Boot failed:\n"+(e && e.message? e.message:String(e)));
   }
 }
 
-async function bindRunner() {
-  await safePy(`
+async function bindRunner(purge){
+  const code = `
+import sys, importlib.util, io, contextlib, traceback
+
+def _purge_spl():
+    for k in list(sys.modules.keys()):
+        if k == "spl" or k.startswith("spl."):
+            del sys.modules[k]
+
+if ${purge ? "True" : "False"}:
+    for p in ("/spl/src","/spl","/"):
+        try:
+            idx = sys.path.index(p); sys.path.pop(idx)
+        except ValueError:
+            pass
+        sys.path.insert(0, p)
+    _purge_spl()
+
 from spl.src.parser import parser as _parser
 from spl.src.interpreter.interpret_spl import interpret as _interpret
-import io, sys, contextlib, traceback
+
 def _run_wrapper(src: str, p: int) -> str:
     prog = _parser.parse(src)
     out = io.StringIO(); err = io.StringIO()
@@ -178,34 +118,29 @@ def _run_wrapper(src: str, p: int) -> str:
     else:
         txt = str(ret) + out.getvalue()
     return txt
-`);
+`;
+  await safePy(code);
 }
 
-runBtn && (runBtn.onclick = async () => {
-  if (!bootDone) { toast("Still booting…", 1400); return; }
+runBtn && (runBtn.onclick = async ()=>{
+  if(!bootDone){ toast("Still booting…",1500); return; }
   clear(outEl);
-  let p = parseInt((primeEl && primeEl.value) || "3", 10);
-  try {
-    const codeJSON = JSON.stringify(srcEl.value);
-    const result = await safePy(`_run_wrapper(${codeJSON}, int(${p}))`);
+  const p = parseInt((primeEl && primeEl.value) || "3", 10);
+  try{
+    const pySrc = JSON.stringify(srcEl.value);
+    const result = await safePy(`_run_wrapper(${pySrc}, int(${p}))`);
     outEl.textContent = String(result);
     toast("Program ran.", 1400);
-  } catch (e) {
-    append(logEl, "[Run Error] " + (e && e.message ? e.message : String(e)));
-    outEl.textContent = "Error running program:\n" + (e && e.message ? e.message : String(e));
-    toast("Run failed. See Errors.", 3000);
+  }catch(e){
+    append(logEl,"[Run Error] "+String(e));
+    outEl.textContent = "Error running program:\n"+String(e);
   }
 });
 
-loadBtn && (loadBtn.onclick = async () => {
-  if (!bootDone) { toast("Still booting…", 1400); return; }
-  try {
-    srcEl.value = await loadText("./teleportation.spl");
-    toast("Teleportation loaded.", 1400);
-  } catch (e) {
-    append(logEl, "[Load Error] " + (e && e.message ? e.message : String(e)));
-    toast("Could not load teleportation.", 2800);
-  }
+loadBtn && (loadBtn.onclick = async ()=>{
+  try{ srcEl.value = await loadText("./teleportation.spl?v="+Date.now()); toast("Teleportation loaded.",1400); }
+  catch(e){ append(logEl,"[Load Error] "+String(e)); }
 });
 
 boot();
+

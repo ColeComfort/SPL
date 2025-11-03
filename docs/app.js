@@ -1,4 +1,4 @@
-// Robust SPL web frontend: waits for boot, resolves parser/interpreter, supports p
+// Robust SPL web frontend: waits for boot, imports fixed parser/interpreter, requires explicit p
 
 const outEl     = document.getElementById("out");
 const srcEl     = document.getElementById("src");
@@ -75,107 +75,24 @@ except Exception:
 `);
 
     statusEl.textContent = "initialising resolver…";
-    // Define run_spl_web *before* enabling buttons
+    // Deterministic wiring: no guessing. Import exact entry points and call with (p, ast, context=ast.context or {}).
     await safePy(`
-import importlib, inspect
+from spl.src.parser.parser import parse_spl
+from spl.src.interpreter.interpret_spl_affine import interpret as interpret_aff
 
-def _first_callable(modname, names):
+def _summarize(env, rel):
+    head = f"p={rel.p}  n_in={rel.n_in}  n_out={rel.n_out}"
     try:
-        m = importlib.import_module(modname)
+        body = rel.to_kernel_str()
     except Exception:
-        return None, None
-    for n in names:
-        f = getattr(m, n, None)
-        if callable(f):
-            return f, f"{modname}.{n}"
-    return None, None
-
-def _resolve_entries():
-    parser_candidates = [
-        ("spl.src.parser.parser", ["parse_spl", "parse"]),
-    ]
-    interp_candidates = [
-        ("spl.src.interpreter.interpret_spl", ["interpret_spl","interpret_program","interpret_to_text","interpret","run"]),
-        ("spl.src.interpreter",               ["interpret_spl","interpret_program","interpret_to_text","interpret","run"]),
-        ("spl.interpreter",                   ["interpret_spl","interpret_program","interpret_to_text","interpret","run"]),
-    ]
-    parser_fn = where_p = None
-    for mod, names in parser_candidates:
-        parser_fn, where_p = _first_callable(mod, names)
-        if parser_fn: break
-    if not parser_fn:
-        raise ImportError("Could not find parser")
-
-    interp_fn = where_i = None
-    for mod, names in interp_candidates:
-        interp_fn, where_i = _first_callable(mod, names)
-        if interp_fn: break
-    if not interp_fn:
-        raise ImportError("Could not find interpreter")
-
-    # Analyse interpreter signature
-    sig = inspect.signature(interp_fn)
-    params = list(sig.parameters.values())
-    names = [p.name for p in params]
-
-    # Heuristics for parameter names
-    P_NAMES = {"p","prime","mod","q","char","field","prime_p"}
-    G_NAMES = {"prog","program","ast","tree","parsed","ir"}
-
-    callmode = None
-    if len(params) == 1:
-        # fn(prog)
-        callmode = ("one",)
-    elif len(params) == 2:
-        # try to map by names first
-        if names[0] in P_NAMES and names[1] in G_NAMES:
-            callmode = ("kw", ("p","prog"))      # fn(p=?, prog=?)
-        elif names[0] in G_NAMES and names[1] in P_NAMES:
-            callmode = ("kw", ("prog","p"))      # fn(prog=?, p=?)
-        else:
-            callmode = ("pos2",)                 # unknown; try positional orders
-    else:
-        callmode = ("unsupported", len(params), names)
-
-    return parser_fn, interp_fn, callmode
-
-# cache
-try:
-    _PARSER, _INTERP, _CALLMODE = _resolve_entries()
-    _ERR = None
-except Exception as e:
-    _PARSER = _INTERP = None
-    _CALLMODE = None
-    _ERR = e
+        body = str(rel)
+    return head + "\\n" + body
 
 def run_spl_web(src: str, p: int) -> str:
-    if _ERR is not None:
-        raise _ERR
-    prog = _PARSER(src)
-    cm = _CALLMODE
-    if cm is None:
-        raise RuntimeError("Interpreter not resolved")
-    if cm[0] == "one":
-        out = _INTERP(prog)
-    elif cm[0] == "kw":
-        order = cm[1]
-        if order == ("p","prog"):
-            out = _INTERP(p=p, prog=prog)
-        else:
-            out = _INTERP(prog=prog, p=p)
-    elif cm[0] == "pos2":
-        # try (p, prog) then (prog, p)
-        ok = False
-        try:
-            out = _INTERP(p, prog); ok = True
-        except TypeError:
-            out = _INTERP(prog, p); ok = True
-        if not ok:
-            raise TypeError("Two-arg interpreter did not accept (p, prog) nor (prog, p).")
-    else:
-        kind, arity, names = cm
-        raise TypeError(f"Unsupported interpreter arity {arity} with params {names}")
-    return out if isinstance(out, str) else str(out)
+    ast = parse_spl(src)
+    ctx = getattr(ast, "context", None) or {}
+    env, rel = interpret_aff(p, ast, context=ctx)
+    return _summarize(env, rel)
 `);
 
     // Load default example

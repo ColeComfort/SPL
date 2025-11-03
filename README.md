@@ -71,7 +71,7 @@ Measurement consumes the quantum register and makes it classical.
 
 ### Experimental classical controlled clifford
 ```spl
-ctrl G c t             % generic token; interpreter also accepts G ∈ {S, F, T, CX}
+ctrl G c t             % Classically controlled clifford where G ∈ {S, F, T, CX}
 ```
 
 ### Classical operations

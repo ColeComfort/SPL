@@ -33,7 +33,7 @@ context { registers with types, delimited by semicolons }
 
 ### Quantum operations
 ```spl
-qinit q                % Initialises quantum register in state |0>
+qinit x                % Initialises quantum register in state |0>
 x     *= G             % Applies single qupit quantum gate G to register x
 (x,y) *= G             % Applies two qupit quantum gate G to registers x and y
 ```

@@ -43,7 +43,6 @@ MUL_k                  % multiplies classical basis elements by k
 ### Quantum operations
 ```spl
 qinit q                % Initialises quantum register in state |0>
-meas q                 % 
 (x,y) *= CX^k          % apply controlled X gate from register x to register y
 ctrlX c t              % classical control: add c into t.x
 ctrlZ c t              % classical control: add c into t.z

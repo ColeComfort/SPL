@@ -22,8 +22,6 @@ When nonlinear operations are not used, this produces relation which uniquely de
 
 ## SPL syntax
 
-SPL statements can be delimited using semicolons:
-
 ### Program Structure
 
 Spl programs consist of an optional context followed by statements delimited by semicolons:

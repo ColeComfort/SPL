@@ -6,7 +6,7 @@ SPL is an environment consuming assembly language for Clifford operations, with 
 
 Affine classical control is efficient, but nonlinear classical control is not.
 
-When nonlinear operations are not used, this produces relation which uniquely determines a completely positive trace-preserving map between finite-dimensional C*-algebras.
+When nonlinear operations are not used, this produces relation which uniquely determines a completely positive trace-preserving map between finite-dimensional C*-algebras.  Otherwise, this produces a set relation which determines the *possible* Puali measurement outcomes.
 
 > SPL++ is a separate high-level language with its own syntax. SPL++ compiles into SPL code. Experimental and not well-tested.
 

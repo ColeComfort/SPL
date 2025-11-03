@@ -2,7 +2,7 @@
 
 SPL is a **flat assembly** for stabiliser-style circuits and classical affine wiring. No functions. No branching. A program is an optional `context` followed by statements. The **domain** is fixed by the context and never changes; statements only append or transform **outputs**.
 
-> SPL++ is a separate high-level language with its own syntax and compiler. Do not mix syntax.
+> SPL++ is a separate high-level language with its own syntax and compiler. Experimental and not well-tested
 
 ---
 
@@ -32,12 +32,18 @@ stmt;
 
 - Without a context the domain is `0` and the program builds outputs only.
 
+### Gate atoms
+```
+IDENT                  % X, Z, S, F, T, CX
+IDENT^k                % exponent k ∈ ℤ, supports exponents in brackets, ie. {-k} or {k}.r
+MUL_k                  % multiplies classical basis elements by k
+```
+
+
 ### Quantum operations
 ```spl
-skip
-init x                 % add classical output x := 0
-qinit q                % add quantum outputs q.x := 0, q.z := 0
-meas q                 % keep q.x, drop q.z, q becomes classical
+qinit q                % Initialises quantum register in state |0>
+meas q                 % 
 (x,y) *= CX^k          % apply controlled X gate from register x to register y
 ctrlX c t              % classical control: add c into t.x
 ctrlZ c t              % classical control: add c into t.z
@@ -46,23 +52,36 @@ ctrl P c t             % generic token; interpreter accepts P in {X,Z}
 
 Quantum operations act on quantum registers and do not produce new registers
 
-### Gate atoms
+### Quantum-classical operations
+```spl
+meas q                 % measures quantum register q in Pauli basis and turns q into a classical register
+ctrlX c t              % classically controlled Pauli X from classical register c onto quantum register t
+ctrlZ c t              % classically controlled Pauli X from classical register c onto quantum register t
+ctrl P c t             % classically controlled Pauli P from classical register c onto quantum register t, where P in {Z, X}
 ```
-IDENT                  % X, Z, S, F, T, CX
-IDENT^k                % exponent k ∈ ℤ, supports exponents in brackets, ie. {-k} or {k}.r
-MUL_k                  % multiplies classical basis elements by k
+
+Classically controlled operations do not consume the classical register.
+Measurement consumes the quantum register and makes it classical
+
+### Experimental classical controlled clifford
+```spl
+ctrl G c t             % generic token; interpreter also accepts G in {S, F, T, CX}
 ```
+
 
 ### Classical operations
 ```spl
+skip                   % nothing operation
+init x                 % add classical output x := 0
+disc x                 % discard classical register x
 (y1,y2) = copy * x     % copies register x into registers y1 and y2
 z    = sum  * (u,v)    % sums registers u and v into register x
 y    = plusone * x     % sets register y to x+1 mod p
-disc x                 % discard classical register x
-t    = and * (u,v)     % sets register t to the product of registers u and v
+t    = and * (u,v)     % sets register t to the product of registers u and v. NONLINEAR and slow to interpret
 ```
 
 Classical operations consume classical input registers and produce new classical registers
+
 
 ## SPL example: Teleportation
 
@@ -113,7 +132,7 @@ Outcome: an relation and a dictionary indexing the input and output registers.  
 
 # SPL++ (separate language)
 
-SPL++ is a **high-level** language with functions, kinds, control, and a compiler that lowers programs to SPL. Its syntax is **different** from SPL.
+SPL++ is an **experimental**, not-well-tested,  **high-level** language with functions, kinds, control, and a compiler that lowers programs to SPL.
 
 ## SPL++ essentials
 

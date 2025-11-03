@@ -1,3 +1,4 @@
+# Internal runner module: importable as 'runner' from inside the zipapp
 def run_spl(src: str) -> str:
     from spl.src.parser.parser import parse_spl
     from spl.src.interpreter.interpret_spl import interpret_spl

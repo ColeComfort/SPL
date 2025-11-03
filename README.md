@@ -194,7 +194,7 @@ fn main() {
 make install
 
 # Run SPL interpreter on a .spl file
-make run-spl FILE=examples/teleportation.spl
+make run-spl FILE=spl/programs/teleportation.spl
 
 # Or directly:
 PYTHONPATH=. python -m spl.scripts.spl_rel path/to/program.spl

@@ -2,7 +2,7 @@
 
 SPL is a **flat assembly** for stabiliser-style circuits and classical affine wiring. No functions. No branching. A program is an optional `context` followed by statements. The **domain** is fixed by the context and never changes; statements only append or transform **outputs**. Programs are interpreted as affine relations, set relations or set functions. Affine relations and set functions are preferred, because they can be computed tractably.
 
-> SPL++ is a separate high-level language with its own syntax and compiler. Experimental and not well-tested
+> SPL++ is a separate high-level language with its own syntax. SPL++ compiles into SPL code. Experimental and not well-tested.
 
 ---
 

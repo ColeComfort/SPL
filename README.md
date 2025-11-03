@@ -82,7 +82,7 @@ ctrl G c t             % Classically controlled clifford where G ∈ {S, F, T, C
 skip                      % nothing operation
 init x                    % initialise classical register x with value 0
 disc x                    % discard classical register x
-(x,z)   = copy * x        % copies register x into registers y and z
+(y,z)   = copy * x        % copies register x into registers y and z
 z       = sum  * (x,y)    % sums registers x and y into register z
 y       = plusone * x     % sets register y to x+1 mod p
 z       = and * (x,y)     % sets register z to the product of registers x and y. NONLINEAR and slow to interpret

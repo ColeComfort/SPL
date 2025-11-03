@@ -32,59 +32,37 @@ stmt;
 
 - Without a context the domain is `0` and the program builds outputs only.
 
-### Statements
+### Quantum operations
 ```spl
 skip
 init x                 % add classical output x := 0
 qinit q                % add quantum outputs q.x := 0, q.z := 0
-disc x                 % remove outputs (alias: discard)
-discard x
 meas q                 % keep q.x, drop q.z, q becomes classical
-(x,y) *= CX^k          % apply gate
-t = sum * (x,y)        % classical transforms (see below)
+(x,y) *= CX^k          % apply controlled X gate from register x to register y
 ctrlX c t              % classical control: add c into t.x
 ctrlZ c t              % classical control: add c into t.z
 ctrl P c t             % generic token; interpreter accepts P in {X,Z}
 ```
 
-Notes:
-- `meas q` converts `q` in place. No arrow.
-- Register position is a name or a pair `(r1, r2)` for binary gates.
-- `disc` and `discard` are synonyms.
+Quantum operations act on quantum registers and do not produce new registers
 
 ### Gate atoms
 ```
 IDENT                  % X, Z, S, F, T, CX
-IDENT^k                % exponent k ∈ ℤ
-MUL_k                  % parameter k for dilation (k in 𝔽_p^×)
+IDENT^k                % exponent k ∈ ℤ, supports exponents in brackets, ie. {-k} or {k}.r
+MUL_k                  % multiplies classical basis elements by k
 ```
 
-### Classical transforms
+### Classical operations
+```spl
+(y1,y2) = copy * x     % copies register x into registers y1 and y2
+z    = sum  * (u,v)    % sums registers u and v into register x
+y    = plusone * x     % sets register y to x+1 mod p
+disc x                 % discard classical register x
+t    = and * (u,v)     % sets register t to the product of registers u and v
 ```
-(y1,y2) = copy * x       % 1→2
-z    = sum  * (u,v)    % 2→1
-x    = plusone * x     % in-place increment mod p
-t    = and * (u,v)     % 2→1, non-affine → set backend
-```
-All named wires must already exist and be classical. Arity checks are strict.
 
----
-
-## SPL semantics
-
-The environment maps variable names to **output coordinates**.
-
-- `init x`: append 1 coordinate, bind `x`.
-- `qinit q`: append 2 coordinates, bind `q.x`, `q.z`.
-- `meas q`: keep `q.x`, drop `q.z`, bind `q` to the remaining classical coordinate.
-- `disc x`: delete bound coordinates and reindex remaining outputs.
-- `ctrlX c q`: add classical `c` into `q.x` mod `p`.
-- `ctrlZ c q`: add classical `c` into `q.z` mod `p`.
-- Gates compose on outputs; inputs are those fixed by `context`.
-
-Affine backend composes affine relations. Set backend composes relations extensionally over tuples.
-
----
+Classical operations consume classical input registers and produce new classical registers
 
 ## SPL example: Teleportation
 

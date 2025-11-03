@@ -136,7 +136,7 @@ Outcome: an relation and a dictionary indexing the input and output registers.  
 
 ---
 
-# SPL++ (separate language)
+# SPL++
 
 SPL++ is an **experimental**, not-well-tested,  **high-level** language with functions, kinds, control, and a compiler that lowers programs to SPL.
 

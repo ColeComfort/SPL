@@ -70,13 +70,13 @@ ctrl G c t             % generic token; interpreter also accepts G in {S, F, T, 
 
 ### Classical operations
 ```spl
-skip                   % nothing operation
-init x                 % add classical output x := 0
-disc x                 % discard classical register x
-(y1,y2) = copy * x     % copies register x into registers y1 and y2
-z    = sum  * (u,v)    % sums registers u and v into register x
-y    = plusone * x     % sets register y to x+1 mod p
-t    = and * (u,v)     % sets register t to the product of registers u and v. NONLINEAR and slow to interpret
+skip                      % nothing operation
+init x                    % add classical output x := 0
+disc x                    % discard classical register x
+(y1,y2) = copy * x        % copies register x into registers y1 and y2
+z       = sum  * (u,v)    % sums registers u and v into register x
+y       = plusone * x     % sets register y to x+1 mod p
+t       = and * (u,v)     % sets register t to the product of registers u and v. NONLINEAR and slow to interpret
 ```
 
 Classical operations consume classical input registers and produce new classical registers

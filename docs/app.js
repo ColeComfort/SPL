@@ -1,6 +1,5 @@
-// placeholder
-// app.js — SPL Online with robust error reporting
-// Works with Pyodide 0.26.x. Adds UI error logs and Python traceback capture.
+// app-plain.js — no spl_web. Calls SPL interpreter directly.
+// Pyodide 0.26.x
 
 const $ = (sel) => document.querySelector(sel);
 const outEl = $("#out");
@@ -10,23 +9,19 @@ const versionEl = $("#version");
 const btnRun = $("#run");
 const btnLoadTeleport = $("#load-teleport");
 const srcEl = $("#src");
-const primeEl = document.getElementById("odd prime") || $("#prime");
+const primeEl = document.getElementById("prime") || document.getElementById("odd prime");
 
 function append(el, txt) {
   if (!txt) return;
   el.textContent += String(txt) + "\n";
   el.scrollTop = el.scrollHeight;
 }
-
 function clear(el) { el.textContent = ""; }
-
 function toast(msg, ms = 3500) {
-  const t = $("#toast");
-  t.textContent = msg;
-  t.style.display = "block";
+  const t = $("#toast"); if (!t) return;
+  t.textContent = msg; t.style.display = "block";
   setTimeout(() => (t.style.display = "none"), ms);
 }
-
 function installGlobalErrorHandlers() {
   window.addEventListener("error", (ev) => {
     append(logEl, `[JS Error] ${ev.message}\n${ev.filename}:${ev.lineno}:${ev.colno}`);
@@ -41,7 +36,6 @@ function installGlobalErrorHandlers() {
   console.warn = (...args) => { orig.warn(...args); append(logEl, "[warn] " + args.join(" ")); };
   console.error = (...args) => { orig.error(...args); append(logEl, "[error] " + args.join(" ")); };
 }
-
 installGlobalErrorHandlers();
 
 let pyodide = null;
@@ -49,73 +43,79 @@ let pyBooted = false;
 
 async function boot() {
   try {
-    statusEl.textContent = "loading runtime…";
+    statusEl && (statusEl.textContent = "loading runtime…");
     pyodide = await loadPyodide();
-    versionEl.textContent = `Pyodide ${pyodide.version}`;
+    versionEl && (versionEl.textContent = `Pyodide ${pyodide.version}`);
     pyodide.setStdout({ batched: (s) => append(outEl, s) });
     pyodide.setStderr({ batched: (s) => append(logEl, s) });
-    const havePyz = await urlExists("./spl-run.pyz");
-    if (havePyz) {
-      statusEl.textContent = "loading SPL zip…";
-      const buf = await (await fetch("./spl-run.pyz")).arrayBuffer();
-      pyodide.FS.writeFile("/spl-run.pyz", new Uint8Array(buf));
-      await pyodide.runPythonAsync(`
-import sys
-if "/spl-run.pyz" not in sys.path:
-    sys.path.insert(0, "/spl-run.pyz")
-try:
-    from spl_web import run_spl_web  # preferred
-except Exception:
-    run_spl_web = None
-`);
-      const hasRun = await pyodide.runPythonAsync("run_spl_web is not None");
-      if (!hasRun) {
-        append(logEl, "[setup] spl-run.pyz present but spl_web.run_spl_web not found. Falling back to manifest.");
-        await mountFromManifest();
-      }
-    } else {
-      await mountFromManifest();
-    }
 
-    const ok = await pyodide.runPythonAsync(`
-try:
-    from spl_web import run_spl_web as _runner
-    assert callable(_runner)
-    True
-except Exception as e:
-    print("Runner import failed:", e)
-    False
-`);
-    if (!ok) throw new Error("run_spl_web entry point not available");
+    // Mount from manifest.json only
+    await mountFromManifest();
 
+    // Define a universal _run_wrapper that imports parser+interpreter and runs it.
     await pyodide.runPythonAsync(`
+import sys, io, contextlib, traceback
+def _import_parser():
+    try:
+        from spl.src.parser import parser as spl_parser
+        return spl_parser
+    except Exception:
+        from spl.parser import parser as spl_parser
+        return spl_parser
+def _import_interp():
+    try:
+        import spl.src.interpreter.interpret_spl as interp
+    except Exception:
+        import spl.interpreter.interpret_spl as interp
+    return interp
+def _find_runner(imod):
+    for fname in ("run_program","run","interpret"):
+        if hasattr(imod, fname):
+            return getattr(imod, fname)
+    raise RuntimeError("No interpreter entry point found in interpret_spl")
 def _run_wrapper(src: str, p: int):
-    from spl_web import run_spl_web as _runner
-    return _runner(src, p)
+    if not isinstance(src, str):
+        raise TypeError("src must be str")
+    if not isinstance(p, int) or p <= 1:
+        raise ValueError("p must be an odd prime integer")
+    spl_parser = _import_parser()
+    interp = _import_interp()
+    runner = _find_runner(interp)
+    ast = spl_parser.parse(src)
+    out = io.StringIO(); err = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            try:
+                ret = runner(ast, p=p)
+            except TypeError:
+                ret = runner(ast, p)
+        except Exception:
+            traceback.print_exc()
+            raise
+    txt = out.getvalue()
+    if isinstance(ret, tuple) and len(ret)==2:
+        ro, re = ret
+        txt = (ro if isinstance(ro,str) else str(ro)) + txt
+        err.write(re if isinstance(re,str) else str(re))
+    elif isinstance(ret, str):
+        txt = ret + txt
+    elif ret is not None:
+        txt = str(ret) + txt
+    sys.stderr.write(err.getvalue())
+    return txt
 `);
-
-    btnRun.disabled = false;
-    btnLoadTeleport.disabled = false;
-    statusEl.textContent = "ready";
+    btnRun && (btnRun.disabled = false);
+    btnLoadTeleport && (btnLoadTeleport.disabled = false);
+    statusEl && (statusEl.textContent = "ready");
     pyBooted = true;
   } catch (err) {
     pyBooted = false;
-    statusEl.textContent = "failed";
+    statusEl && (statusEl.textContent = "failed");
     reportError(err, "Boot");
   }
 }
 
-async function urlExists(url) {
-  try {
-    const r = await fetch(url, { method: "HEAD" });
-    return r.ok;
-  } catch {
-    return false;
-  }
-}
-
 async function mountFromManifest() {
-  statusEl.textContent = "mounting sources…";
   const res = await fetch("./manifest.json");
   if (!res.ok) throw new Error(`manifest.json not found (${res.status})`);
   const manifest = await res.json();
@@ -127,20 +127,7 @@ async function mountFromManifest() {
     ensureDirs(vm);
     pyodide.FS.writeFile(vm, txt);
   }
-  await pyodide.runPythonAsync(`
-import sys
-for p in ("/", "/spl", "/spl/src"):
-    (p in sys.path) or sys.path.append(p)
-try:
-    from spl_web import run_spl_web
-except Exception:
-    def run_spl_web(src: str, p: int):
-        from spl.src.parser import parser as spl_parser
-        from spl.src.interpreter import interpret_spl as interp
-        ast = spl_parser.parse(src)
-        text_out, text_err = interp.run_program(ast, p=p)
-        return text_out
-`);
+  await pyodide.runPythonAsync(`import sys\nfor p in ("/", "/spl", "/spl/src"): (p in sys.path) or sys.path.append(p)`);
 }
 
 function ensureDirs(path) {
@@ -164,17 +151,17 @@ btnRun?.addEventListener("click", async () => {
   if (!pyBooted) return;
   clear(outEl);
   btnRun.disabled = true;
-  statusEl.textContent = "running…";
+  statusEl && (statusEl.textContent = "running…");
   try {
-    const p = parseInt(primeEl?.value || "3", 10) || 3;
+    const p = parseInt((primeEl && primeEl.value) || "3", 10) || 3;
     const src = srcEl.value;
     const pySrc = JSON.stringify(src);
     const result = await pyodide.runPythonAsync(`_run_wrapper(${pySrc}, int(${p}))`);
     append(outEl, result);
-    statusEl.textContent = "done";
+    statusEl && (statusEl.textContent = "done");
   } catch (err) {
     reportError(err, "Run");
-    statusEl.textContent = "error";
+    statusEl && (statusEl.textContent = "error");
   } finally {
     btnRun.disabled = false;
   }

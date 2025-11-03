@@ -145,7 +145,7 @@ SPL++ is an **experimental**, not-well-tested,  **high-level** language with fun
 ## SPL++ example: Teleportation
 
 ```spl++
-dim 2;
+dim 3;
 
 // Prepare a Bell pair |Φ+> from |0,0>
 @Linear fn prepare_bell() -> Qdit, Qdit {

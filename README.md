@@ -1,5 +1,7 @@
 # Stabiliser Quantum Programming Language (SPL)
 
+This repository provides an implementation of the language and denotational semantics introduced in the paper *“Denotational Semantics for Stabiliser Quantum Programs”* by Robert I. Booth and Cole Comfort.
+
 SPL is an environment consuming assembly language for Clifford operations, with classically controlled Pauli operations, Pauli basis state preparation, and classical control.
 
 Affine classical control is efficient, but nonlinear classical control is not.

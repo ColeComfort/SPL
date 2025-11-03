@@ -70,7 +70,7 @@ All named wires must already exist and be classical. Arity checks are strict.
 
 ---
 
-## SPL operational semantics
+## SPL semantics
 
 The environment maps variable names to **output coordinates**.
 

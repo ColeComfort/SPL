@@ -22,19 +22,32 @@ When nonlinear operations are not used, this produces relation which uniquely de
 
 ## SPL syntax
 
+SPL statements can be delimited using semicolons:
+
 ### Program
 ```spl
-context { a: pit; q: qpit }   % optional
-stmt;
-stmt;
+context { a: pit; q: qpit } 
+stmt; stmt; ...
+```
+
+Or using newlines:
+
+### Program
+```spl
+context { a: pit
+          q: qpit } 
+stmt
+stmt
 ...
 ```
 
 ### Context
 Context is optional and is declared by 
 ```spl
-context { registers with types, delimited by semicolons }
+context { ... }
 ```
+
+The context consists of a list of variables with their types, ie.  `a: pit` or `q: qpit` delimited by semicolones or newlines.
 
 ### Quantum operations
 ```spl

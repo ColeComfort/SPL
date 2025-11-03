@@ -189,7 +189,6 @@ fn main() {
 ## Build and run
 
 ```bash
-make venv
 make install
 
 # Run SPL interpreter on a .spl file

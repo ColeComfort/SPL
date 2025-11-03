@@ -1,5 +1,5 @@
-// SPL Online frontend — exact wiring to spl.src.interpreter.interpret_spl.interpret(p, prog, context=None)
-// Sends JS and Python errors to #log. Sends Python stdout to #out.
+// app.js — loads spl-run.pyz then overlays /spl/src/... from manifest.json if present.
+// Directly binds to spl.src.interpreter.interpret_spl.interpret(p, prog). Sends errors to #log.
 
 const outEl     = document.getElementById("out");
 const logEl     = document.getElementById("log");
@@ -28,7 +28,6 @@ function toast(msg, ms = 3500) {
   toastEl._t = setTimeout(() => { toastEl.style.display = "none"; }, ms);
 }
 
-// Mirror JS errors and console into #log
 (function installGlobalErrorHandlers(){
   window.addEventListener("error", (ev) => {
     append(logEl, `[JS Error] ${ev.message}\n${ev.filename}:${ev.lineno}:${ev.colno}`);
@@ -63,6 +62,35 @@ async function safePy(code) {
   }
 }
 
+async function maybeOverlayFromManifest() {
+  try {
+    const res = await fetch("./manifest.json", { cache: "no-store" });
+    if (!res.ok) return false;
+    const manifest = await res.json();
+    if (!manifest.files || !Array.isArray(manifest.files)) return false;
+    for (const f of manifest.files) {
+      const url = f.url;
+      const vm  = f.vm;
+      const txt = await (await fetch(url, { cache: "no-store" })).text();
+      // ensure dirs
+      const parts = vm.split("/").filter(Boolean);
+      let cur = "";
+      for (let i = 0; i < parts.length - 1; i++) {
+        cur += "/" + parts[i];
+        try { pyodide.FS.mkdir(cur); } catch {}
+      }
+      pyodide.FS.writeFile(vm, txt);
+    }
+    // put root paths
+    await safePy(`import sys\nfor p in ("/", "/spl", "/spl/src"): (p in sys.path) or sys.path.append(p)`);
+    append(logEl, "[overlay] manifest.json applied over zipapp");
+    return true;
+  } catch (e) {
+    append(logEl, "[overlay] manifest overlay failed: " + (e && e.message ? e.message : String(e)));
+    return false;
+  }
+}
+
 async function boot() {
   try {
     if (location.protocol === "file:") {
@@ -72,19 +100,13 @@ async function boot() {
 
     statusEl && (statusEl.textContent = "loading Python…");
     pyodide = await loadPyodide();
-
-    // Route Python stdout/stderr
     pyodide.setStdout({ batched: (s) => append(outEl, s) });
     pyodide.setStderr({ batched: (s) => append(logEl, s) });
 
     statusEl && (statusEl.textContent = "mounting zipapp…");
     const zipBytes = await loadBinary("./spl-run.pyz");
     pyodide.FS.writeFile("/spl-run.pyz", zipBytes, { canOwn: true });
-    await safePy(`
-import sys
-if "/spl-run.pyz" not in sys.path:
-    sys.path.insert(0, "/spl-run.pyz")
-`);
+    await safePy(`import sys\nsys.path.insert(0, "/spl-run.pyz")`);
 
     statusEl && (statusEl.textContent = "verifying deps…");
     await safePy(`
@@ -96,31 +118,56 @@ except Exception:
     await micropip.install("lark>=1.1,<2")
 `);
 
+    // Try to import now; if missing modules, apply overlay then retry.
     statusEl && (statusEl.textContent = "binding runner…");
-    // Exact import and call shape provided by user:
-    //   from spl.src.parser import parser; parser.parse(src) -> Program
-    //   from spl.src.interpreter.interpret_spl import interpret
-    //   interpret(p: int, prog: Program, context: Optional[Dict[str,str]] = None)
-    await safePy(`
+    let bound = false;
+    try {
+      await bindRunner();
+      bound = true;
+    } catch (e) {
+      append(logEl, "[bind] initial import failed, trying manifest overlay… " + (e && e.message ? e.message : String(e)));
+      const ok = await maybeOverlayFromManifest();
+      if (ok) {
+        await bindRunner();
+        bound = true;
+      } else {
+        throw e;
+      }
+    }
+
+    // Load example
+    try {
+      srcEl.value = await loadText("./teleportation.spl");
+      toast("Loaded teleportation example.", 1600);
+    } catch {}
+
+    bootDone = bound;
+    statusEl && (statusEl.textContent = bound ? "ready" : "error");
+    if (runBtn)  runBtn.disabled = !bound;
+    if (loadBtn) loadBtn.disabled = !bound;
+  } catch (e) {
+    statusEl && (statusEl.textContent = "boot error");
+    append(logEl, "[Boot Error] " + (e && e.message ? e.message : String(e)));
+    outEl && (outEl.textContent = "Boot failed:\n" + (e && e.message ? e.message : String(e)));
+    toast("Boot failed. See Errors.", 4000);
+  }
+}
+
+async function bindRunner() {
+  await safePy(`
 from spl.src.parser import parser as _parser
 from spl.src.interpreter.interpret_spl import interpret as _interpret
 import io, sys, contextlib, traceback
-
 def _run_wrapper(src: str, p: int) -> str:
-    if not isinstance(src, str): raise TypeError("src must be str")
-    if not isinstance(p, int):  raise TypeError("p must be int")
     prog = _parser.parse(src)
     out = io.StringIO(); err = io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
-            # exact signature: interpret(p, prog, context=None)
             ret = _interpret(p, prog)
         except Exception:
             traceback.print_exc()
             raise
-    # flush captured stderr so JS sees it
     sys.stderr.write(err.getvalue())
-    # normalize return to string + printed stdout
     if isinstance(ret, tuple) and len(ret)==2:
         ro, re = ret
         txt = (ro if isinstance(ro,str) else str(ro)) + out.getvalue()
@@ -132,51 +179,32 @@ def _run_wrapper(src: str, p: int) -> str:
         txt = str(ret) + out.getvalue()
     return txt
 `);
-
-    // Load example if present
-    try {
-      srcEl.value = await loadText("./teleportation.spl");
-      toast("Loaded teleportation example.", 1800);
-    } catch {
-      if (srcEl) srcEl.placeholder = "Missing ./teleportation.spl";
-    }
-
-    bootDone = true;
-    statusEl && (statusEl.textContent = "ready");
-    if (runBtn)  runBtn.disabled = false;
-    if (loadBtn) loadBtn.disabled = false;
-  } catch (e) {
-    statusEl && (statusEl.textContent = "boot error");
-    append(logEl, "[Boot Error] " + (e && e.message ? e.message : String(e)));
-    outEl && (outEl.textContent = "Boot failed:\n" + (e && e.message ? e.message : String(e)));
-    toast("Boot failed. See Errors.", 5000);
-  }
 }
 
 runBtn && (runBtn.onclick = async () => {
-  if (!bootDone) { toast("Still booting…", 1500); return; }
+  if (!bootDone) { toast("Still booting…", 1400); return; }
   clear(outEl);
   let p = parseInt((primeEl && primeEl.value) || "3", 10);
   try {
     const codeJSON = JSON.stringify(srcEl.value);
     const result = await safePy(`_run_wrapper(${codeJSON}, int(${p}))`);
     outEl.textContent = String(result);
-    toast("Program ran.", 1500);
+    toast("Program ran.", 1400);
   } catch (e) {
     append(logEl, "[Run Error] " + (e && e.message ? e.message : String(e)));
     outEl.textContent = "Error running program:\n" + (e && e.message ? e.message : String(e));
-    toast("Run failed. See Errors.", 4000);
+    toast("Run failed. See Errors.", 3000);
   }
 });
 
 loadBtn && (loadBtn.onclick = async () => {
-  if (!bootDone) { toast("Still booting…", 1500); return; }
+  if (!bootDone) { toast("Still booting…", 1400); return; }
   try {
     srcEl.value = await loadText("./teleportation.spl");
-    toast("Teleportation loaded.", 1500);
+    toast("Teleportation loaded.", 1400);
   } catch (e) {
     append(logEl, "[Load Error] " + (e && e.message ? e.message : String(e)));
-    toast("Could not load teleportation.", 3000);
+    toast("Could not load teleportation.", 2800);
   }
 });
 

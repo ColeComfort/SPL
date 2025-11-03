@@ -53,6 +53,15 @@ if "/spl-run.pyz" not in sys.path:
     sys.path.insert(0, "/spl-run.pyz")
 `);
 
+    await safePy(`
+    import importlib
+    try:
+        importlib.import_module("lark")
+    except Exception:
+        import micropip
+        await micropip.install("lark>=1.1,<2")
+    `);
+
     // Default example
     try {
       srcEl.value = await loadText("./teleportation.spl");

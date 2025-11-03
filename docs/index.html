@@ -11,11 +11,7 @@
       button{padding:8px 16px}
       .row{display:flex;gap:12px;align-items:center;margin:8px 0;flex-wrap:wrap}
       .muted{opacity:.7;font-size:.9em}
-      .footer{margin-top:16px}
       .spacer{flex:1}
-      .error{color:#a00}
-      .ok{color:#0a0}
-      .warn{color:#a60}
       #toast{position:fixed;right:16px;bottom:16px;padding:10px 12px;border:1px solid #ccc;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.15);display:none}
     </style>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.26.3/full/pyodide.js"></script>
@@ -35,11 +31,6 @@
     <pre id="out" aria-live="polite"></pre>
 
     <div id="toast" role="status" aria-live="assertive"></div>
-
-    <div class="footer muted">
-      Source: <a href="https://github.com/ColeComfort/SPL">github.com/ColeComfort/SPL</a>
-    </div>
-
     <script type="module" src="./app.js"></script>
   </body>
 </html>

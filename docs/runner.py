@@ -1,11 +1,11 @@
-# Connects the in-browser UI to your SPL interpreter.
+# Browser glue. Uses the interpreter packaged inside /spl-run.pyz.
 
 def run_spl(src: str) -> str:
-    # Import inside function so errors surface in the UI.
     import sys
-    if "/" not in sys.path:
-        sys.path.insert(0, "/")
+    if "/spl-run.pyz" not in sys.path:
+        sys.path.insert(0, "/spl-run.pyz")
 
+    # Import from modules inside the zipapp
     from spl.src.parser.parser import parse_spl
     from spl.src.interpreter.interpret_spl import interpret_spl
 

@@ -1,22 +1,23 @@
-const statusEl  = document.getElementById("status");
 const outEl     = document.getElementById("out");
 const srcEl     = document.getElementById("src");
-const versionEl = document.getElementById("version");
 const runBtn    = document.getElementById("run");
 const loadBtn   = document.getElementById("load-teleport");
+const versionEl = document.getElementById("version");
 const toastEl   = document.getElementById("toast");
-
-// Example file in repo root relative to /web/
-const EXAMPLE_PATH = "../spl/programs/teleportation.spl";
 
 let pyodide;
 
-function toast(msg, cls="warn", ms=4000){
-  toastEl.className = cls;
+function toast(msg, ms=4000){
   toastEl.textContent = msg;
   toastEl.style.display = "block";
   clearTimeout(toastEl._t);
   toastEl._t = setTimeout(()=>{ toastEl.style.display="none"; }, ms);
+}
+
+async function loadBinary(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 async function loadText(path) {
@@ -25,86 +26,70 @@ async function loadText(path) {
   return await res.text();
 }
 
-async function safeRunPython(code){
-  try {
-    return await pyodide.runPythonAsync(code);
-  } catch (e) {
-    throw new Error(String(e));
-  }
+async function safePy(code){
+  try { return await pyodide.runPythonAsync(code); }
+  catch (e) { throw new Error(String(e)); }
 }
 
 async function boot() {
   try {
-    statusEl.textContent = "loading Python…";
-    pyodide = await loadPyodide();
-
-    versionEl.textContent = "SPL web • " + (new URL(location.href)).href;
-
-    statusEl.textContent = "loading SPL modules…";
-    const manifest = JSON.parse(await loadText("./manifest.json"));
-
-    for (const f of manifest.files) {
-      const code = await loadText(f.url);
-      const dir = f.vm.split("/").slice(0, -1).join("/");
-      if (dir) {
-        try { pyodide.FS.mkdirTree(dir); } catch (_) {}
-      }
-      pyodide.FS.writeFile(f.vm, code);
+    if (location.protocol === "file:") {
+      throw new Error("Serve via GitHub Pages or a local HTTP server.");
     }
 
-    // Ensure "/" is importable
-    await safeRunPython(`
+    versionEl.textContent = (new URL(location.href)).href;
+
+    pyodide = await loadPyodide();
+
+    // Load the zipapp named spl-run.pyz and add to sys.path
+    const zipBytes = await loadBinary("./spl-run.pyz");
+    pyodide.FS.writeFile("/spl-run.pyz", zipBytes, { canOwn: true });
+    await safePy(`
 import sys
-if "/" not in sys.path:
-    sys.path.insert(0, "/")
+if "/spl-run.pyz" not in sys.path:
+    sys.path.insert(0, "/spl-run.pyz")
 `);
 
-    // Runner glue
-    await safeRunPython(await loadText("./runner.py"));
+    // Minimal glue to call into the zipapp
+    await safePy(await loadText("./runner.py"));
 
     // Default example
     try {
-      srcEl.value = await loadText(EXAMPLE_PATH);
-      toast("Loaded teleportation example.", "ok", 2500);
-    } catch (e) {
-      srcEl.placeholder = "Teleportation example missing: " + EXAMPLE_PATH;
-      toast("Could not load teleportation example. " + e.message, "warn");
+      srcEl.value = await loadText("./teleportation.spl");
+      toast("Loaded teleportation example.", 2000);
+    } catch (_) {
+      srcEl.placeholder = "Missing ./teleportation.spl";
+      toast("Could not load teleportation example.", 5000);
     }
-
-    statusEl.textContent = "ready";
   } catch (e) {
-    statusEl.textContent = "boot error";
     outEl.textContent = "Boot failed:\n" + e.message;
-    toast("Boot failed. See Output for details.", "error", 6000);
+    toast("Boot failed. See Output.", 6000);
   }
 }
 
 runBtn.onclick = async () => {
   if (!pyodide) return;
-  statusEl.textContent = "running…";
   outEl.textContent = "";
   try {
     const codeJSON = JSON.stringify(srcEl.value);
-    const result = await safeRunPython(`
+    const result = await safePy(`
 from runner import run_spl
 run_spl(${codeJSON})
 `);
     outEl.textContent = String(result);
-    statusEl.textContent = "done";
-    toast("Program ran successfully.", "ok", 2000);
+    toast("Program ran.", 2000);
   } catch (e) {
     outEl.textContent = "Error running program:\n" + e.message;
-    statusEl.textContent = "error";
-    toast("Run failed. See Output for details.", "error", 6000);
+    toast("Run failed.", 6000);
   }
 };
 
 loadBtn.onclick = async () => {
   try {
-    srcEl.value = await loadText(EXAMPLE_PATH);
-    toast("Teleportation loaded.", "ok", 2000);
+    srcEl.value = await loadText("./teleportation.spl");
+    toast("Teleportation loaded.", 2000);
   } catch (e) {
-    toast("Could not load teleportation. " + e.message, "error");
+    toast("Could not load teleportation.", 6000);
   }
 };
 

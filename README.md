@@ -123,13 +123,13 @@ This denotes the identity relation from `in` to `out` over \(\mathbb{F}_p\).
 
 High level to low level to semantics:
 
-1. **SPL++** source. High-level functions, types, and controls.
-2. **Compiler** lowers to **SPL**. The result is a flat sequence with an optional `context`.
+1. **SPL++** source. High-level functions, types, and controls (EXPERIMENTAL AND NOT WELL-TESTED).
+2. **Compiler** lowers **SPL++** to **SPL**.
 3. **Interpreter** evaluates SPL as a relation over \(\mathbb{F}_p\):
    - Uses the **Affine** backend if every classical operation is affine.
-   - Uses the **Set** backend only if a non-affine primitive occurs (e.g., `and` or explicit nonlinear branching). The set backend is slower and is avoided when affine suffices.
+   - If there are a mix of affine and nonlinear operations, the interpreter chunks SPL code into segments consisting of affine relations, and set functions. Then the chunks are interpreted separately. If there are affine chunks and nonlinear functions mixed together, they are cast into set relations then composed as set-relations. The goal is to minimize set relation composition to lower the computational complexity.
 
-Outcome: an explicitly printed relation with named coordinates. The domain is fixed by the SPL `context`. The range is built by SPL statements.
+Outcome: an relation and a dictionary indexing the input and output registers.  Quantum registers `a` are split in two `a.x` and `a.z`. Classical registers names are unchanged. The domain is fixed by the SPL `context`. The range is inferred.
 
 ---
 

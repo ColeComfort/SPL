@@ -128,7 +128,7 @@ High level to low level to semantics:
 
 1. **SPL++** source. High-level functions, types, and controls (EXPERIMENTAL AND NOT WELL-TESTED).
 2. **Compiler** lowers **SPL++** to **SPL**.
-3. **Interpreter** evaluates SPL as a relation over \(\mathbb{F}_p\):
+3. **Interpreter** transforms SPL programs into relations. Needs to be provided with a prime number for the dimension.
    - Uses the **Affine** backend if every classical operation is affine.
    - If there are a mix of affine and nonlinear operations, the interpreter chunks SPL code into segments consisting of affine relations, and set functions. Then the chunks are interpreted separately. If there are affine chunks and nonlinear functions mixed together, they are cast into set relations then composed as set-relations. The goal is to minimize set relation composition to lower the computational complexity.
 

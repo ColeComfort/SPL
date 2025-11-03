@@ -1,6 +1,7 @@
 # Stabiliser Quantum Programming Language (SPL)
 
-SPL is a **flat assembly** for stabiliser-style circuits and classical affine wiring. No functions. No branching. A program is an optional `context` followed by statements. The **domain** is fixed by the context and never changes; statements only append or transform **outputs**. Programs are interpreted as affine relations, set relations or set functions. Affine relations and set functions are preferred, because they can be computed tractably.
+SPL is an environment consuming assembly language for Clifford operations, with classically controlled Pauli operations, Pauli basis states, and classical control. Affine classical control is efficient, but nonlinear classical control is not.
+When only affine classical control is used, this produces a relation which uniquely determines a completely positive trace-preserving map between finite-dimensional C*-algebras.
 
 > SPL++ is a separate high-level language with its own syntax. SPL++ compiles into SPL code. Experimental and not well-tested.
 

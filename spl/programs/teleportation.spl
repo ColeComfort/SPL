@@ -8,17 +8,17 @@ qinit out
 x *= F
 (x, out) *= CX
 
-% Bell measurement (SUM then F^{-1} on 'in')
+% Bell measurement
 (in, x) *= CX
 in *= F
 % in *= F
-% in *= F      % F^{-1} since F^4 = I
+% in *= F      
 
 % measure in Z basis
-meas x       % outcome i  (shift)
-meas in      % outcome j  (clock)
+meas x       
+meas in     
 
-% phase correction: apply X^i then Z^j
+% phase correction
 ctrlX x  out
 ctrlZ in out
 

@@ -10,16 +10,20 @@
       textarea{width:100%;height:260px}
       pre{white-space:pre-wrap;border:1px solid #ccc;padding:12px;min-height:160px}
       button{padding:8px 16px}
+      input[type=number]{width:7em;padding:6px}
       .row{display:flex;gap:12px;align-items:center;margin:8px 0;flex-wrap:wrap}
       .muted{opacity:.7;font-size:.9em}
       .spacer{flex:1}
       #toast{position:fixed;right:16px;bottom:16px;padding:10px 12px;border:1px solid #ccc;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.15);display:none}
+      label{display:inline-flex;align-items:center;gap:6px}
     </style>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.26.3/full/pyodide.js"></script>
   </head>
   <body>
     <h1>SPL Online</h1>
+
     <div class="row">
+      <label>Prime p: <input id="prime" type="number" value="2" min="2" step="1" /></label>
       <button id="run">Run</button>
       <button id="load-teleport">Load teleportation</button>
       <span class="spacer"></span>

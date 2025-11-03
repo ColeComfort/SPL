@@ -1,4 +1,4 @@
-// docs/app.js — self-contained: no external runner module needed
+// docs/app.js — resolves parser & interpreter dynamically and passes prime p
 
 const outEl     = document.getElementById("out");
 const srcEl     = document.getElementById("src");
@@ -6,6 +6,7 @@ const runBtn    = document.getElementById("run");
 const loadBtn   = document.getElementById("load-teleport");
 const versionEl = document.getElementById("version");
 const toastEl   = document.getElementById("toast");
+const primeEl   = document.getElementById("prime");
 
 let pyodide;
 
@@ -15,6 +16,14 @@ function toast(msg, ms = 4000) {
   toastEl.style.display = "block";
   clearTimeout(toastEl._t);
   toastEl._t = setTimeout(() => { toastEl.style.display = "none"; }, ms);
+}
+
+function isPrime(n) {
+  if (!Number.isInteger(n) || n < 2) return false;
+  if (n % 2 === 0) return n === 2;
+  const r = Math.floor(Math.sqrt(n));
+  for (let d = 3; d <= r; d += 2) if (n % d === 0) return false;
+  return true;
 }
 
 async function loadBinary(path) {
@@ -63,9 +72,9 @@ except Exception:
     await micropip.install("lark>=1.1,<2")
 `);
 
-    // Define a small helper module in-session that resolves parser & interpreter dynamically
+    // Define a helper that resolves parser & interpreter and supports p-parameterized interpreters
     await safePy(`
-import types, importlib
+import importlib, inspect
 
 def _first_callable(modname, names):
     try:
@@ -75,7 +84,7 @@ def _first_callable(modname, names):
     for n in names:
         f = getattr(m, n, None)
         if callable(f):
-            return f, f"{{modname}}.{{n}}"
+            return f, f"{modname}.{n}"
     return None, None
 
 def _resolve_entries():
@@ -101,22 +110,44 @@ def _resolve_entries():
     if not interp_fn:
         raise ImportError("Could not find interpreter among: " + "; ".join(f"{m}.{names}" for m,n in interp_candidates))
 
-    return parser_fn, interp_fn, where_p, where_i
+    # Analyze interpreter signature to decide how to call it
+    sig = inspect.signature(interp_fn)
+    params = list(sig.parameters.values())
+    # Normalize to one of: fn(prog), fn(p, prog), fn(prog, p)
+    if len(params) == 1:
+        callmode = "prog"
+    elif len(params) == 2:
+        # try both orders later; we'll attempt (p, prog) then (prog, p)
+        callmode = "twoargs"
+    else:
+        callmode = f"unsupported:{len(params)}"
+    return parser_fn, interp_fn, where_p, where_i, callmode
 
-# cache on first import
+# cache resolution
 try:
-    _PARSER, _INTERP, _PW, _IW = _resolve_entries()
+    _PARSER, _INTERP, _PW, _IW, _CALLMODE = _resolve_entries()
     _ERR = None
 except Exception as e:
     _PARSER = _INTERP = None
-    _PW = _IW = ""
+    _PW = _IW = _CALLMODE = ""
     _ERR = e
 
-def run_spl_web(src: str) -> str:
+def run_spl_web(src: str, p: int) -> str:
     if _ERR is not None:
         raise _ERR
     prog = _PARSER(src)
-    out = _INTERP(prog)
+    if _CALLMODE == "prog":
+        out = _INTERP(prog)
+    elif _CALLMODE == "twoargs":
+        ok = False
+        try:
+            out = _INTERP(p, prog); ok = True
+        except TypeError:
+            out = _INTERP(prog, p); ok = True
+        if not ok:
+            raise TypeError("Interpreter expects two args but neither (p, prog) nor (prog, p) succeeded.")
+    else:
+        raise TypeError(f"Unsupported interpreter arity: {_CALLMODE}")
     return out if isinstance(out, str) else str(out)
 `);
 
@@ -137,11 +168,13 @@ def run_spl_web(src: str) -> str:
 runBtn.onclick = async () => {
   if (!pyodide) return;
   outEl.textContent = "";
+  let p = parseInt(primeEl.value, 10);
+  if (!isPrime(p)) {
+    toast("Warning: p should be prime. Using entered value anyway.", 3000);
+  }
   try {
     const codeJSON = JSON.stringify(srcEl.value);
-    const result = await safePy(`
-run_spl_web(${codeJSON})
-`);
+    const result = await safePy(`run_spl_web(${codeJSON}, ${p})`);
     outEl.textContent = String(result);
     toast("Program ran.", 2000);
   } catch (e) {

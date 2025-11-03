@@ -28,7 +28,7 @@ stmt;
 
 Context is optional and is used to generate relations with inputs, rather than states. Comments are given by %.
 
-### Gate atoms
+### Quantum gates
 ```
 IDENT                  % X, Z, S, F, T, CX
 IDENT^k                % exponent k ∈ ℤ, supports exponents in brackets, ie. {-k} or {k}.r

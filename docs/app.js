@@ -1,145 +1,187 @@
-// Robust SPL web frontend: waits for boot, imports fixed parser/interpreter, requires explicit p
+// app.js
+// Robust Pyodide bootstrap + visible error reporting using existing DOM ids.
 
-const outEl     = document.getElementById("out");
-const srcEl     = document.getElementById("src");
-const runBtn    = document.getElementById("run");
-const loadBtn   = document.getElementById("load-teleport");
-const versionEl = document.getElementById("version");
-const toastEl   = document.getElementById("toast");
-const primeEl   = document.getElementById("prime");
-const statusEl  = document.getElementById("status");
+const $ = (id) => document.getElementById(id);
+const state = { pyodide: null, ready: false, pyReadyPromise: null };
 
-let pyodide;
-let bootDone = false;
-
-function toast(msg, ms = 4000) {
-  if (!toastEl) return;
-  toastEl.textContent = msg;
-  toastEl.style.display = "block";
-  clearTimeout(toastEl._t);
-  toastEl._t = setTimeout(() => { toastEl.style.display = "none"; }, ms);
+function append(pre, text) {
+  pre.textContent += text;
+  pre.scrollTop = pre.scrollHeight;
 }
-
-function isPrime(n) {
-  if (!Number.isInteger(n) || n < 2) return false;
-  if (n % 2 === 0) return n === 2;
-  const r = Math.floor(Math.sqrt(n));
-  for (let d = 3; d <= r; d += 2) if (n % d === 0) return false;
-  return true;
+function clearPane(pre) {
+  pre.textContent = "";
 }
+function setStatus(s) { $("status").textContent = s; }
 
-async function loadBinary(path) {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
-  return new Uint8Array(await res.arrayBuffer());
-}
+async function loadPyodideAndSPL() {
+  if (state.pyReadyPromise) return state.pyReadyPromise;
+  state.pyReadyPromise = (async () => {
+    setStatus("loading Pyodide…");
+    const pyodide = await loadPyodide();
+    state.pyodide = pyodide;
 
-async function loadText(path) {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
-  return await res.text();
-}
+    // Wire stdout/stderr to panes
+    pyodide.setStdout({ batched: (s) => append($("out"), s) });
+    pyodide.setStderr({ batched: (s) => append($("log"), s) });
 
-async function safePy(code) {
-  try { return await pyodide.runPythonAsync(code); }
-  catch (e) { throw new Error(String(e)); }
-}
+    // Small banner to confirm JS side is working
+    append($("log"), "[JS] Pyodide loaded\n");
 
-async function boot() {
-  try {
-    if (location.protocol === "file:") {
-      throw new Error("Serve via GitHub Pages or a local HTTP server.");
+    // Load project files described by manifest.json into the VM FS
+    setStatus("fetching manifest…");
+    const manifest = await fetch("./manifest.json").then((r) => {
+      if (!r.ok) throw new Error(`manifest.json HTTP ${r.status}`);
+      return r.json();
+    });
+
+    setStatus("mounting files…");
+    const FS = pyodide.FS;
+    for (const { url, vm } of manifest.files || []) {
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`${url} HTTP ${resp.status}`);
+        const buf = await resp.arrayBuffer();
+        const path = vm.startsWith("/") ? vm : `/${vm}`;
+        const dir = path.split("/").slice(0, -1).join("/") || "/";
+        // ensure dir exists
+        const parts = dir.split("/").filter(Boolean);
+        let cur = "";
+        for (const p of parts) {
+          cur += "/" + p;
+          try { FS.lookupPath(cur); } catch { FS.mkdir(cur); }
+        }
+        // write file
+        FS.writeFile(path, new Uint8Array(buf));
+      } catch (e) {
+        append($("log"), `[JS] Failed to mount ${url} -> ${vm}: ${e.message}\n`);
+      }
     }
-    if (versionEl) versionEl.textContent = new URL(location.href).href;
 
-    statusEl.textContent = "loading Python…";
-    pyodide = await loadPyodide();
-
-    statusEl.textContent = "mounting interpreter…";
-    const zipBytes = await loadBinary("./spl-run.pyz");
-    pyodide.FS.writeFile("/spl-run.pyz", zipBytes, { canOwn: true });
-    await safePy(`
-import sys
-if "/spl-run.pyz" not in sys.path:
-    sys.path.insert(0, "/spl-run.pyz")
-`);
-
-    statusEl.textContent = "checking deps…";
-    await safePy(`
-import importlib
-try:
-    importlib.import_module("lark")
-except Exception:
-    import micropip
-    await micropip.install("lark>=1.1,<2")
-`);
-
-    statusEl.textContent = "initialising resolver…";
-    // Deterministic wiring: no guessing. Import exact entry points and call with (p, ast, context=ast.context or {}).
-    await safePy(`
-from spl.src.parser.parser import parse_spl
-from spl.src.interpreter.interpret_spl_affine import interpret as interpret_aff
-
-def _summarize(env, rel):
-    head = f"p={rel.p}  n_in={rel.n_in}  n_out={rel.n_out}"
-    try:
-        body = rel.to_kernel_str()
-    except Exception:
-        body = str(rel)
-    return head + "\\n" + body
-
-def run_spl_web(src: str, p: int) -> str:
-    ast = parse_spl(src)
-    ctx = getattr(ast, "context", None) or {}
-    env, rel = interpret_aff(p, ast, context=ctx)
-    return _summarize(env, rel)
-`);
-
-    // Load default example
+    // Preload teleportation example if shipped alongside
     try {
-      srcEl.value = await loadText("./teleportation.spl");
-      toast("Loaded teleportation example.", 2000);
+      const tele = await fetch("./teleportation.spl");
+      if (tele.ok) {
+        const txt = await tele.text();
+        $("load-teleport").addEventListener("click", () => {
+          $("src").value = txt;
+        });
+        $("load-teleport").disabled = false;
+      }
     } catch {
-      srcEl.placeholder = "Missing ./teleportation.spl";
-      toast("Could not load teleportation example.", 5000);
+      // optional; ignore
     }
 
-    bootDone = true;
-    statusEl.textContent = "ready";
-    runBtn.disabled = false;
-    loadBtn.disabled = false;
-  } catch (e) {
-    statusEl.textContent = "boot error";
-    outEl.textContent = "Boot failed:\n" + e.message;
-    toast("Boot failed. See Output.", 6000);
+    // Define a stable Python entrypoint once. It only returns strings.
+    setStatus("initializing entrypoint…");
+    const py = `
+import sys, traceback
+
+# Lazy import to avoid import-time failures making Run a no-op.
+def _run_once(src: str, p_value: int) -> str:
+    try:
+        # Prefer your canonical parser/interpreter modules.
+        # These paths come from manifest.json that mounted /spl/src/...
+        from spl.src.parser import parser as _parser
+        from spl.src.interpreter import interpret_spl as _interp
+
+        # Parse. Try signatures defensively and report exact errors.
+        prog = None
+        parse_errs = []
+        for call in (
+            lambda: _parser.parse_spl(src),                      # no p
+            lambda: _parser.parse_spl(src, p=p_value),           # named p
+            lambda: _parser.parse_spl(src, prime=p_value),       # named prime
+        ):
+            try:
+                prog = call()
+                break
+            except TypeError as te:
+                parse_errs.append(str(te))
+        if prog is None:
+            raise TypeError("parse_spl signature mismatch attempts: " + " | ".join(parse_errs))
+
+        # Interpret. Try common signatures, surface full traceback on failure.
+        rel = None
+        interp_errs = []
+        for call in (
+            lambda: _interp.interpret(prog),                     # simple
+            lambda: _interp.interpret(prog, p=p_value),          # named p
+            lambda: _interp.interpret(prog, prime=p_value),      # named prime
+        ):
+            try:
+                rel = call()
+                break
+            except TypeError as te:
+                interp_errs.append(str(te))
+        if rel is None:
+            raise TypeError("interpret signature mismatch attempts: " + " | ".join(interp_errs))
+
+        # Convert to text. Prefer pretty printer if present.
+        if hasattr(rel, "to_kernel_str"):
+            return rel.to_kernel_str()
+        return str(rel)
+
+    except Exception as e:
+        return "[PYTHON ERROR]\\n" + "".join(traceback.format_exception(type(e), e, e.__traceback__))
+`;
+    await pyodide.runPythonAsync(py);
+
+    // Show versions
+    const pyver = pyodide.runPython(`import sys; sys.version.split()[0]`);
+    const pydver = pyodide.version;
+    $("version").textContent = `Python ${pyver} • Pyodide ${pydver}`;
+    setStatus("ready");
+    $("run").disabled = false;
+    state.ready = true;
+    return true;
+  })();
+  return state.pyReadyPromise;
+}
+
+async function runOnce() {
+  if (!state.ready) await loadPyodideAndSPL();
+  clearPane($("out"));
+  clearPane($("log"));
+  setStatus("running…");
+  $("run").disabled = true;
+  try {
+    const src = $("src").value;
+    const p = parseInt($("odd prime").value, 10);
+    if (!Number.isInteger(p) || p < 3) {
+      append($("log"), "[JS] Invalid prime p (must be integer ≥ 3)\n");
+    }
+
+    // Feed code to Python and capture returned string. Never rely on implicit prints.
+    const code = `
+_src = ${JSON.stringify(src)}
+_p = int(${Number.isFinite(p) ? p : 3})
+_out_text = _run_once(_src, _p)
+`;
+    await state.pyodide.runPythonAsync(code);
+    const out = state.pyodide.globals.get("_out_text");
+    if (typeof out === "string" && out.startsWith("[PYTHON ERROR]")) {
+      append($("log"), out + "\n");
+    } else {
+      append($("out"), String(out) + "\n");
+    }
+  } catch (err) {
+    // Show JS-side or Pyodide-wrapped errors verbosely.
+    const isPy = err && err.name === "PythonError";
+    append($("log"), (isPy ? err.message : (err.stack || String(err))) + "\n");
+  } finally {
+    $("run").disabled = false;
+    setStatus("idle");
   }
 }
 
-runBtn.onclick = async () => {
-  if (!bootDone) { toast("Still booting…", 2000); return; }
-  outEl.textContent = "";
-  let p = parseInt(primeEl.value, 10);
-  if (!isPrime(p)) toast("Warning: p should be prime. Using entered value anyway.", 3000);
-  try {
-    const codeJSON = JSON.stringify(srcEl.value);
-    const result = await safePy(`run_spl_web(${codeJSON}, ${p})`);
-    outEl.textContent = String(result);
-    toast("Program ran.", 2000);
-  } catch (e) {
-    outEl.textContent = "Error running program:\n" + e.message;
-    toast("Run failed.", 6000);
-  }
-};
+window.addEventListener("error", (e) => append($("log"), `[JS] ${e.message}\n`));
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  append($("log"), `[JS] Unhandled rejection: ${r && r.stack ? r.stack : String(r)}\n`);
+});
 
-loadBtn.onclick = async () => {
-  if (!bootDone) { toast("Still booting…", 2000); return; }
-  try {
-    srcEl.value = await loadText("./teleportation.spl");
-    toast("Teleportation loaded.", 2000);
-  } catch (e) {
-    toast("Could not load teleportation.", 6000);
-  }
-};
-
-boot();
+window.addEventListener("DOMContentLoaded", () => {
+  void loadPyodideAndSPL();
+  $("run").addEventListener("click", () => { void runOnce(); });
+});
 

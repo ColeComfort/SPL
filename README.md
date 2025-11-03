@@ -30,7 +30,7 @@ stmt;
 ...
 ```
 
-- Without a context the domain is `0` and the program builds outputs only.
+Context is optional and is used to generate relations with inputs, rather than states.
 
 ### Gate atoms
 ```

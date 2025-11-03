@@ -1,7 +1,8 @@
-// Robust SPL web frontend: waits for boot, resolves parser/interpreter, supports p
-// + HTML error reporting (logs to #log, mirrors console, captures Python stderr)
+// SPL Online frontend — exact wiring to spl.src.interpreter.interpret_spl.interpret(p, prog, context=None)
+// Sends JS and Python errors to #log. Sends Python stdout to #out.
 
 const outEl     = document.getElementById("out");
+const logEl     = document.getElementById("log");
 const srcEl     = document.getElementById("src");
 const runBtn    = document.getElementById("run");
 const loadBtn   = document.getElementById("load-teleport");
@@ -9,9 +10,8 @@ const versionEl = document.getElementById("version");
 const toastEl   = document.getElementById("toast");
 const primeEl   = document.getElementById("prime") || document.getElementById("odd prime");
 const statusEl  = document.getElementById("status");
-const logEl     = document.getElementById("log");  // Errors panel (optional)
 
-let pyodide;
+let pyodide = null;
 let bootDone = false;
 
 function append(el, txt) {
@@ -20,33 +20,12 @@ function append(el, txt) {
   el.scrollTop = el.scrollHeight;
 }
 function clear(el) { if (el) el.textContent = ""; }
-
-function toast(msg, ms = 4000) {
+function toast(msg, ms = 3500) {
   if (!toastEl) return;
   toastEl.textContent = msg;
   toastEl.style.display = "block";
   clearTimeout(toastEl._t);
   toastEl._t = setTimeout(() => { toastEl.style.display = "none"; }, ms);
-}
-
-function isPrime(n) {
-  if (!Number.isInteger(n) || n < 2) return false;
-  if (n % 2 === 0) return n === 2;
-  const r = Math.floor(Math.sqrt(n));
-  for (let d = 3; d <= r; d += 2) if (n % d === 0) return false;
-  return true;
-}
-
-async function loadBinary(path) {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
-  return new Uint8Array(await res.arrayBuffer());
-}
-
-async function loadText(path) {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
-  return await res.text();
 }
 
 // Mirror JS errors and console into #log
@@ -65,11 +44,21 @@ async function loadText(path) {
   console.error= (...a) => { orig.error(...a);append(logEl, "[error] " + a.join(" ")); };
 })();
 
+async function loadBinary(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+async function loadText(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${path}`);
+  return await res.text();
+}
+
 async function safePy(code) {
   try { return await pyodide.runPythonAsync(code); }
   catch (e) {
     append(logEl, "[Python Error] " + String(e));
-    // Pyodide often includes Python traceback inside e.message
     throw new Error(String(e));
   }
 }
@@ -77,18 +66,18 @@ async function safePy(code) {
 async function boot() {
   try {
     if (location.protocol === "file:") {
-      throw new Error("Serve via GitHub Pages or a local HTTP server.");
+      throw new Error("Serve via HTTP (e.g., GitHub Pages).");
     }
     if (versionEl) versionEl.textContent = new URL(location.href).href;
 
     statusEl && (statusEl.textContent = "loading Python…");
     pyodide = await loadPyodide();
 
-    // Route Python stdout/stderr to HTML
+    // Route Python stdout/stderr
     pyodide.setStdout({ batched: (s) => append(outEl, s) });
     pyodide.setStderr({ batched: (s) => append(logEl, s) });
 
-    statusEl && (statusEl.textContent = "mounting interpreter…");
+    statusEl && (statusEl.textContent = "mounting zipapp…");
     const zipBytes = await loadBinary("./spl-run.pyz");
     pyodide.FS.writeFile("/spl-run.pyz", zipBytes, { canOwn: true });
     await safePy(`
@@ -97,7 +86,7 @@ if "/spl-run.pyz" not in sys.path:
     sys.path.insert(0, "/spl-run.pyz")
 `);
 
-    statusEl && (statusEl.textContent = "checking deps…");
+    statusEl && (statusEl.textContent = "verifying deps…");
     await safePy(`
 import importlib
 try:
@@ -107,122 +96,49 @@ except Exception:
     await micropip.install("lark>=1.1,<2")
 `);
 
-    statusEl && (statusEl.textContent = "initialising resolver…");
-    // Define run_spl_web *before* enabling buttons
+    statusEl && (statusEl.textContent = "binding runner…");
+    // Exact import and call shape provided by user:
+    //   from spl.src.parser import parser; parser.parse(src) -> Program
+    //   from spl.src.interpreter.interpret_spl import interpret
+    //   interpret(p: int, prog: Program, context: Optional[Dict[str,str]] = None)
     await safePy(`
-import importlib, inspect, io, sys, contextlib, traceback
+from spl.src.parser import parser as _parser
+from spl.src.interpreter.interpret_spl import interpret as _interpret
+import io, sys, contextlib, traceback
 
-def _first_callable(modname, names):
-    try:
-        m = importlib.import_module(modname)
-    except Exception:
-        return None, None
-    for n in names:
-        f = getattr(m, n, None)
-        if callable(f):
-            return f, f"{modname}.{n}"
-    return None, None
-
-def _resolve_entries():
-    parser_candidates = [
-        ("spl.src.parser.parser", ["parse_spl", "parse"]),
-        ("spl.parser.parser",     ["parse_spl", "parse"]),
-    ]
-    interp_candidates = [
-        ("spl.src.interpreter.interpret_spl", ["interpret_spl","interpret_program","interpret_to_text","interpret","run","run_program"]),
-        ("spl.src.interpreter",               ["interpret_spl","interpret_program","interpret_to_text","interpret","run","run_program"]),
-        ("spl.interpreter.interpret_spl",     ["interpret_spl","interpret_program","interpret_to_text","interpret","run","run_program"]),
-        ("spl.interpreter",                   ["interpret_spl","interpret_program","interpret_to_text","interpret","run","run_program"]),
-    ]
-    parser_fn = where_p = None
-    for mod, names in parser_candidates:
-        parser_fn, where_p = _first_callable(mod, names)
-        if parser_fn: break
-    if not parser_fn:
-        raise ImportError("Could not find parser")
-
-    interp_fn = where_i = None
-    for mod, names in interp_candidates:
-        interp_fn, where_i = _first_callable(mod, names)
-        if interp_fn: break
-    if not interp_fn:
-        raise ImportError("Could not find interpreter")
-
-    # Analyse interpreter signature
-    sig = inspect.signature(interp_fn)
-    params = list(sig.parameters.values())
-    names = [p.name for p in params]
-
-    # Heuristics for parameter names
-    P_NAMES = {"p","prime","mod","q","char","field","prime_p"}
-    G_NAMES = {"prog","program","ast","tree","parsed","ir"}
-
-    callmode = None
-    if len(params) == 1:
-        # fn(prog)
-        callmode = ("one",)
-    elif len(params) == 2:
-        # try to map by names first
-        if names[0] in P_NAMES and names[1] in G_NAMES:
-            callmode = ("kw", ("p","prog"))      # fn(p=?, prog=?)
-        elif names[0] in G_NAMES and names[1] in P_NAMES:
-            callmode = ("kw", ("prog","p"))      # fn(prog=?, p=?)
-        else:
-            callmode = ("pos2",)                 # unknown; try positional orders
+def _run_wrapper(src: str, p: int) -> str:
+    if not isinstance(src, str): raise TypeError("src must be str")
+    if not isinstance(p, int):  raise TypeError("p must be int")
+    prog = _parser.parse(src)
+    out = io.StringIO(); err = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            # exact signature: interpret(p, prog, context=None)
+            ret = _interpret(p, prog)
+        except Exception:
+            traceback.print_exc()
+            raise
+    # flush captured stderr so JS sees it
+    sys.stderr.write(err.getvalue())
+    # normalize return to string + printed stdout
+    if isinstance(ret, tuple) and len(ret)==2:
+        ro, re = ret
+        txt = (ro if isinstance(ro,str) else str(ro)) + out.getvalue()
+    elif isinstance(ret, str):
+        txt = ret + out.getvalue()
+    elif ret is None:
+        txt = out.getvalue()
     else:
-        callmode = ("unsupported", len(params), names)
-
-    return parser_fn, interp_fn, callmode
-
-# cache
-try:
-    _PARSER, _INTERP, _CALLMODE = _resolve_entries()
-    _ERR = None
-except Exception as e:
-    _PARSER = _INTERP = None
-    _CALLMODE = None
-    _ERR = e
-
-def run_spl_web(src: str, p: int) -> str:
-    if _ERR is not None:
-        raise _ERR
-    prog = _PARSER(src)
-    cm = _CALLMODE
-    if cm is None:
-        raise RuntimeError("Interpreter not resolved")
-    out_buf, err_buf = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
-        if cm[0] == "one":
-            out = _INTERP(prog)
-        elif cm[0] == "kw":
-            order = cm[1]
-            if order == ("p","prog"):
-                out = _INTERP(p=p, prog=prog)
-            else:
-                out = _INTERP(prog=prog, p=p)
-        elif cm[0] == "pos2":
-            ok = False
-            try:
-                out = _INTERP(p, prog); ok = True
-            except TypeError:
-                out = _INTERP(prog, p); ok = True
-            if not ok:
-                raise TypeError("Two-arg interpreter did not accept (p, prog) nor (prog, p).")
-        else:
-            kind, arity, names = cm
-            raise TypeError(f"Unsupported interpreter arity {arity} with params {names}")
-    # flush captured stderr to real stderr so JS sees it
-    sys.stderr.write(err_buf.getvalue())
-    return out if isinstance(out, str) else str(out)
+        txt = str(ret) + out.getvalue()
+    return txt
 `);
 
-    // Load default example
+    // Load example if present
     try {
       srcEl.value = await loadText("./teleportation.spl");
-      toast("Loaded teleportation example.", 2000);
+      toast("Loaded teleportation example.", 1800);
     } catch {
       if (srcEl) srcEl.placeholder = "Missing ./teleportation.spl";
-      toast("Could not load teleportation example.", 5000);
     }
 
     bootDone = true;
@@ -233,35 +149,34 @@ def run_spl_web(src: str, p: int) -> str:
     statusEl && (statusEl.textContent = "boot error");
     append(logEl, "[Boot Error] " + (e && e.message ? e.message : String(e)));
     outEl && (outEl.textContent = "Boot failed:\n" + (e && e.message ? e.message : String(e)));
-    toast("Boot failed. See Errors.", 6000);
+    toast("Boot failed. See Errors.", 5000);
   }
 }
 
 runBtn && (runBtn.onclick = async () => {
-  if (!bootDone) { toast("Still booting…", 2000); return; }
+  if (!bootDone) { toast("Still booting…", 1500); return; }
   clear(outEl);
-  let p = parseInt(primeEl && primeEl.value, 10);
-  if (!isPrime(p)) toast("Warning: p should be prime. Using entered value anyway.", 3000);
+  let p = parseInt((primeEl && primeEl.value) || "3", 10);
   try {
     const codeJSON = JSON.stringify(srcEl.value);
-    const result = await safePy(`run_spl_web(${codeJSON}, ${p})`);
+    const result = await safePy(`_run_wrapper(${codeJSON}, int(${p}))`);
     outEl.textContent = String(result);
-    toast("Program ran.", 2000);
+    toast("Program ran.", 1500);
   } catch (e) {
     append(logEl, "[Run Error] " + (e && e.message ? e.message : String(e)));
     outEl.textContent = "Error running program:\n" + (e && e.message ? e.message : String(e));
-    toast("Run failed. See Errors.", 6000);
+    toast("Run failed. See Errors.", 4000);
   }
 });
 
 loadBtn && (loadBtn.onclick = async () => {
-  if (!bootDone) { toast("Still booting…", 2000); return; }
+  if (!bootDone) { toast("Still booting…", 1500); return; }
   try {
     srcEl.value = await loadText("./teleportation.spl");
-    toast("Teleportation loaded.", 2000);
+    toast("Teleportation loaded.", 1500);
   } catch (e) {
     append(logEl, "[Load Error] " + (e && e.message ? e.message : String(e)));
-    toast("Could not load teleportation.", 6000);
+    toast("Could not load teleportation.", 3000);
   }
 });
 

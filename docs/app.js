@@ -1,187 +1,194 @@
-// app.js
-// Robust Pyodide bootstrap + visible error reporting using existing DOM ids.
+// placeholder
+// app.js — SPL Online with robust error reporting
+// Works with Pyodide 0.26.x. Adds UI error logs and Python traceback capture.
 
-const $ = (id) => document.getElementById(id);
-const state = { pyodide: null, ready: false, pyReadyPromise: null };
+const $ = (sel) => document.querySelector(sel);
+const outEl = $("#out");
+const logEl = $("#log");
+const statusEl = $("#status");
+const versionEl = $("#version");
+const btnRun = $("#run");
+const btnLoadTeleport = $("#load-teleport");
+const srcEl = $("#src");
+const primeEl = document.getElementById("odd prime") || $("#prime");
 
-function append(pre, text) {
-  pre.textContent += text;
-  pre.scrollTop = pre.scrollHeight;
-}
-function clearPane(pre) {
-  pre.textContent = "";
-}
-function setStatus(s) { $("status").textContent = s; }
-
-async function loadPyodideAndSPL() {
-  if (state.pyReadyPromise) return state.pyReadyPromise;
-  state.pyReadyPromise = (async () => {
-    setStatus("loading Pyodide…");
-    const pyodide = await loadPyodide();
-    state.pyodide = pyodide;
-
-    // Wire stdout/stderr to panes
-    pyodide.setStdout({ batched: (s) => append($("out"), s) });
-    pyodide.setStderr({ batched: (s) => append($("log"), s) });
-
-    // Small banner to confirm JS side is working
-    append($("log"), "[JS] Pyodide loaded\n");
-
-    // Load project files described by manifest.json into the VM FS
-    setStatus("fetching manifest…");
-    const manifest = await fetch("./manifest.json").then((r) => {
-      if (!r.ok) throw new Error(`manifest.json HTTP ${r.status}`);
-      return r.json();
-    });
-
-    setStatus("mounting files…");
-    const FS = pyodide.FS;
-    for (const { url, vm } of manifest.files || []) {
-      try {
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`${url} HTTP ${resp.status}`);
-        const buf = await resp.arrayBuffer();
-        const path = vm.startsWith("/") ? vm : `/${vm}`;
-        const dir = path.split("/").slice(0, -1).join("/") || "/";
-        // ensure dir exists
-        const parts = dir.split("/").filter(Boolean);
-        let cur = "";
-        for (const p of parts) {
-          cur += "/" + p;
-          try { FS.lookupPath(cur); } catch { FS.mkdir(cur); }
-        }
-        // write file
-        FS.writeFile(path, new Uint8Array(buf));
-      } catch (e) {
-        append($("log"), `[JS] Failed to mount ${url} -> ${vm}: ${e.message}\n`);
-      }
-    }
-
-    // Preload teleportation example if shipped alongside
-    try {
-      const tele = await fetch("./teleportation.spl");
-      if (tele.ok) {
-        const txt = await tele.text();
-        $("load-teleport").addEventListener("click", () => {
-          $("src").value = txt;
-        });
-        $("load-teleport").disabled = false;
-      }
-    } catch {
-      // optional; ignore
-    }
-
-    // Define a stable Python entrypoint once. It only returns strings.
-    setStatus("initializing entrypoint…");
-    const py = `
-import sys, traceback
-
-# Lazy import to avoid import-time failures making Run a no-op.
-def _run_once(src: str, p_value: int) -> str:
-    try:
-        # Prefer your canonical parser/interpreter modules.
-        # These paths come from manifest.json that mounted /spl/src/...
-        from spl.src.parser import parser as _parser
-        from spl.src.interpreter import interpret_spl as _interp
-
-        # Parse. Try signatures defensively and report exact errors.
-        prog = None
-        parse_errs = []
-        for call in (
-            lambda: _parser.parse_spl(src),                      # no p
-            lambda: _parser.parse_spl(src, p=p_value),           # named p
-            lambda: _parser.parse_spl(src, prime=p_value),       # named prime
-        ):
-            try:
-                prog = call()
-                break
-            except TypeError as te:
-                parse_errs.append(str(te))
-        if prog is None:
-            raise TypeError("parse_spl signature mismatch attempts: " + " | ".join(parse_errs))
-
-        # Interpret. Try common signatures, surface full traceback on failure.
-        rel = None
-        interp_errs = []
-        for call in (
-            lambda: _interp.interpret(prog),                     # simple
-            lambda: _interp.interpret(prog, p=p_value),          # named p
-            lambda: _interp.interpret(prog, prime=p_value),      # named prime
-        ):
-            try:
-                rel = call()
-                break
-            except TypeError as te:
-                interp_errs.append(str(te))
-        if rel is None:
-            raise TypeError("interpret signature mismatch attempts: " + " | ".join(interp_errs))
-
-        # Convert to text. Prefer pretty printer if present.
-        if hasattr(rel, "to_kernel_str"):
-            return rel.to_kernel_str()
-        return str(rel)
-
-    except Exception as e:
-        return "[PYTHON ERROR]\\n" + "".join(traceback.format_exception(type(e), e, e.__traceback__))
-`;
-    await pyodide.runPythonAsync(py);
-
-    // Show versions
-    const pyver = pyodide.runPython(`import sys; sys.version.split()[0]`);
-    const pydver = pyodide.version;
-    $("version").textContent = `Python ${pyver} • Pyodide ${pydver}`;
-    setStatus("ready");
-    $("run").disabled = false;
-    state.ready = true;
-    return true;
-  })();
-  return state.pyReadyPromise;
+function append(el, txt) {
+  if (!txt) return;
+  el.textContent += String(txt) + "\n";
+  el.scrollTop = el.scrollHeight;
 }
 
-async function runOnce() {
-  if (!state.ready) await loadPyodideAndSPL();
-  clearPane($("out"));
-  clearPane($("log"));
-  setStatus("running…");
-  $("run").disabled = true;
+function clear(el) { el.textContent = ""; }
+
+function toast(msg, ms = 3500) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  setTimeout(() => (t.style.display = "none"), ms);
+}
+
+function installGlobalErrorHandlers() {
+  window.addEventListener("error", (ev) => {
+    append(logEl, `[JS Error] ${ev.message}\n${ev.filename}:${ev.lineno}:${ev.colno}`);
+    if (ev.error && ev.error.stack) append(logEl, ev.error.stack);
+  });
+  window.addEventListener("unhandledrejection", (ev) => {
+    append(logEl, `[Promise Rejection] ${ev.reason}`);
+    try { append(logEl, ev.reason && ev.reason.stack); } catch {}
+  });
+  const orig = { log: console.log, warn: console.warn, error: console.error };
+  console.log = (...args) => { orig.log(...args); append(logEl, args.join(" ")); };
+  console.warn = (...args) => { orig.warn(...args); append(logEl, "[warn] " + args.join(" ")); };
+  console.error = (...args) => { orig.error(...args); append(logEl, "[error] " + args.join(" ")); };
+}
+
+installGlobalErrorHandlers();
+
+let pyodide = null;
+let pyBooted = false;
+
+async function boot() {
   try {
-    const src = $("src").value;
-    const p = parseInt($("odd prime").value, 10);
-    if (!Number.isInteger(p) || p < 3) {
-      append($("log"), "[JS] Invalid prime p (must be integer ≥ 3)\n");
+    statusEl.textContent = "loading runtime…";
+    pyodide = await loadPyodide();
+    versionEl.textContent = `Pyodide ${pyodide.version}`;
+    pyodide.setStdout({ batched: (s) => append(outEl, s) });
+    pyodide.setStderr({ batched: (s) => append(logEl, s) });
+    const havePyz = await urlExists("./spl-run.pyz");
+    if (havePyz) {
+      statusEl.textContent = "loading SPL zip…";
+      const buf = await (await fetch("./spl-run.pyz")).arrayBuffer();
+      pyodide.FS.writeFile("/spl-run.pyz", new Uint8Array(buf));
+      await pyodide.runPythonAsync(`
+import sys
+if "/spl-run.pyz" not in sys.path:
+    sys.path.insert(0, "/spl-run.pyz")
+try:
+    from spl_web import run_spl_web  # preferred
+except Exception:
+    run_spl_web = None
+`);
+      const hasRun = await pyodide.runPythonAsync("run_spl_web is not None");
+      if (!hasRun) {
+        append(logEl, "[setup] spl-run.pyz present but spl_web.run_spl_web not found. Falling back to manifest.");
+        await mountFromManifest();
+      }
+    } else {
+      await mountFromManifest();
     }
 
-    // Feed code to Python and capture returned string. Never rely on implicit prints.
-    const code = `
-_src = ${JSON.stringify(src)}
-_p = int(${Number.isFinite(p) ? p : 3})
-_out_text = _run_once(_src, _p)
-`;
-    await state.pyodide.runPythonAsync(code);
-    const out = state.pyodide.globals.get("_out_text");
-    if (typeof out === "string" && out.startsWith("[PYTHON ERROR]")) {
-      append($("log"), out + "\n");
-    } else {
-      append($("out"), String(out) + "\n");
-    }
+    const ok = await pyodide.runPythonAsync(`
+try:
+    from spl_web import run_spl_web as _runner
+    assert callable(_runner)
+    True
+except Exception as e:
+    print("Runner import failed:", e)
+    False
+`);
+    if (!ok) throw new Error("run_spl_web entry point not available");
+
+    await pyodide.runPythonAsync(`
+def _run_wrapper(src: str, p: int):
+    from spl_web import run_spl_web as _runner
+    return _runner(src, p)
+`);
+
+    btnRun.disabled = false;
+    btnLoadTeleport.disabled = false;
+    statusEl.textContent = "ready";
+    pyBooted = true;
   } catch (err) {
-    // Show JS-side or Pyodide-wrapped errors verbosely.
-    const isPy = err && err.name === "PythonError";
-    append($("log"), (isPy ? err.message : (err.stack || String(err))) + "\n");
-  } finally {
-    $("run").disabled = false;
-    setStatus("idle");
+    pyBooted = false;
+    statusEl.textContent = "failed";
+    reportError(err, "Boot");
   }
 }
 
-window.addEventListener("error", (e) => append($("log"), `[JS] ${e.message}\n`));
-window.addEventListener("unhandledrejection", (e) => {
-  const r = e.reason;
-  append($("log"), `[JS] Unhandled rejection: ${r && r.stack ? r.stack : String(r)}\n`);
+async function urlExists(url) {
+  try {
+    const r = await fetch(url, { method: "HEAD" });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function mountFromManifest() {
+  statusEl.textContent = "mounting sources…";
+  const res = await fetch("./manifest.json");
+  if (!res.ok) throw new Error(`manifest.json not found (${res.status})`);
+  const manifest = await res.json();
+  if (!manifest.files || !Array.isArray(manifest.files)) throw new Error("manifest missing files[]");
+  for (const f of manifest.files) {
+    const url = f.url;
+    const vm = f.vm;
+    const txt = await (await fetch(url)).text();
+    ensureDirs(vm);
+    pyodide.FS.writeFile(vm, txt);
+  }
+  await pyodide.runPythonAsync(`
+import sys
+for p in ("/", "/spl", "/spl/src"):
+    (p in sys.path) or sys.path.append(p)
+try:
+    from spl_web import run_spl_web
+except Exception:
+    def run_spl_web(src: str, p: int):
+        from spl.src.parser import parser as spl_parser
+        from spl.src.interpreter import interpret_spl as interp
+        ast = spl_parser.parse(src)
+        text_out, text_err = interp.run_program(ast, p=p)
+        return text_out
+`);
+}
+
+function ensureDirs(path) {
+  const parts = path.split("/").filter(Boolean);
+  let cur = "";
+  for (let i = 0; i < parts.length - 1; i++) {
+    cur += "/" + parts[i];
+    try { pyodide.FS.mkdir(cur); } catch {}
+  }
+}
+
+function reportError(err, phase = "Run") {
+  const header = `[${phase} Error]`;
+  if (err && err.message) append(logEl, `${header} ${err.message}`);
+  if (err && err.stack) append(logEl, err.stack);
+  try { append(logEl, String(err)); } catch {}
+  toast(`${phase} error. See Errors panel.`);
+}
+
+btnRun?.addEventListener("click", async () => {
+  if (!pyBooted) return;
+  clear(outEl);
+  btnRun.disabled = true;
+  statusEl.textContent = "running…";
+  try {
+    const p = parseInt(primeEl?.value || "3", 10) || 3;
+    const src = srcEl.value;
+    const pySrc = JSON.stringify(src);
+    const result = await pyodide.runPythonAsync(`_run_wrapper(${pySrc}, int(${p}))`);
+    append(outEl, result);
+    statusEl.textContent = "done";
+  } catch (err) {
+    reportError(err, "Run");
+    statusEl.textContent = "error";
+  } finally {
+    btnRun.disabled = false;
+  }
 });
 
-window.addEventListener("DOMContentLoaded", () => {
-  void loadPyodideAndSPL();
-  $("run").addEventListener("click", () => { void runOnce(); });
+btnLoadTeleport?.addEventListener("click", async () => {
+  try {
+    const res = await fetch("./teleportation.spl");
+    if (!res.ok) throw new Error(`teleportation.spl ${res.status}`);
+    srcEl.value = await res.text();
+    toast("Loaded teleportation.spl");
+  } catch (err) {
+    reportError(err, "Load example");
+  }
 });
 
+boot();

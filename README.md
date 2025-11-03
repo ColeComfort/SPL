@@ -39,7 +39,8 @@ MUL_k                  % multiplies classical basis elements by k
 ### Quantum operations
 ```spl
 qinit q                % Initialises quantum register in state |0>
-(x,y) *= CX^k          % apply controlled X gate from register x to register y
+(x,y) *= CX            % apply controlled X gate from register x to register y
+(x,y) *= CX^k          % apply controlled X^k gate from register x to register y, where k ∈ ℤ
 ctrlX c t              % classical control: add c into t.x
 ctrlZ c t              % classical control: add c into t.z
 ctrl P c t             % generic token; interpreter accepts P in {X,Z}
@@ -52,7 +53,7 @@ Quantum operations act on quantum registers and do not produce new registers
 meas q                 % measures quantum register q in Pauli basis and turns q into a classical register
 ctrlX c t              % classically controlled Pauli X from classical register c onto quantum register t
 ctrlZ c t              % classically controlled Pauli X from classical register c onto quantum register t
-ctrl P c t             % classically controlled Pauli P from classical register c onto quantum register t, where P in {Z, X}
+ctrl P c t             % classically controlled Pauli P from classical register c onto quantum register t, where P ∈ {Z, X}
 ```
 
 Classically controlled operations do not consume the classical register.
@@ -60,7 +61,7 @@ Measurement consumes the quantum register and makes it classical
 
 ### Experimental classical controlled clifford
 ```spl
-ctrl G c t             % generic token; interpreter also accepts G in {S, F, T, CX}
+ctrl G c t             % generic token; interpreter also accepts G ∈ {S, F, T, CX}
 ```
 
 
@@ -107,7 +108,8 @@ ctrlZ in out
 disc in
 disc x
 ```
-This denotes the identity relation from `in` to `out` over \(\mathbb{F}_p\).
+
+This is interpreted as identity relation from `in` to `out`.
 
 ---
 

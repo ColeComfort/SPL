@@ -30,7 +30,7 @@ stmt;
 ...
 ```
 
-Context is optional and is used to generate relations with inputs, rather than states.
+Context is optional and is used to generate relations with inputs, rather than states. Comments are given by %.
 
 ### Gate atoms
 ```

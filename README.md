@@ -57,7 +57,6 @@ Two qupit quantum gates:
 ```
 CX                     % Classically ontrolled X gate
 CX^k                   % Classically controlled X^k gate for k ∈ ℤ, supports exponents in brackets, ie. {-k} or {k}.
-MUL_k                  % multiplies classical basis elements by k ∈ ℤ,
 ```
 
 ### Quantum-classical operations

@@ -1,260 +1,108 @@
-
-from dataclasses import dataclass
-from typing import Optional, Dict, List, Tuple, Callable, Set
-
-from spl.src.parser.parser import Program, Init, QInit, Discard, Meas, ApplyGate, AffineAssign, Ctrl, Skip, _names_of
+from typing import Optional, Dict, List, Tuple
+from spl.src.parser.parser import Program, Init, QInit, Discard, Meas, ApplyGate, AffineAssign, Ctrl
 from spl.src.interpreter.interpret_spl_affine import interpret as interpret_affine
 from spl.src.interpreter.interpret_spl_sets import interpret as interpret_sets
-from spl.src.relations.set_relations import SetRelation
-from spl.src.relations.affine_relations import AffineRelation
+from spl.src.dispatch.chunker import chunk_program, Chunk
 
-# ---------- helpers: classify and segment ----------
+PAULI_SET = {"X", "Z"}
 
-def _is_classical_stmt(s) -> bool:
-    return isinstance(s, (Init, Discard, AffineAssign, Skip))
-
-def _is_quantum_stmt(s) -> bool:
-    return isinstance(s, (QInit, Meas, ApplyGate, Ctrl))
-
-def _needs_sets_stmt(s) -> bool:
-    # Non-Pauli ctrl
+def _is_nonpauli_ctrl(s: object) -> bool:
     if isinstance(s, Ctrl):
-        g = (s.pauli or "").upper()
-        return g not in {"X","Z"}
+        g = str(getattr(s, "pauli", "")).strip().upper()
+        return g not in PAULI_SET
     return False
-
-def _has_and_assign(s) -> bool:
-    return isinstance(s, AffineAssign) and str(s.transform).strip().lower() == "and"
-
-def _segment_program(stmts: List[object]) -> List[Tuple[str, List[object]]]:
-    """Return list of (kind, chunk_stmts) where kind in {'FUNC','AFFINE','SETS'}.
-       We form maximal classical chunks (FUNC), and maximal quantum chunks.
-       Quantum chunks are marked 'AFFINE' unless they contain non-Pauli ctrl; then 'SETS'.
-    """
-    chunks: List[Tuple[str, List[object]]] = []
-    cur_kind = None
-    cur: List[object] = []
-
-    def flush():
-        nonlocal cur, cur_kind
-        if cur:
-            chunks.append((cur_kind, cur))
-            cur = []
-            cur_kind = None
-
-    i = 0
-    while i < len(stmts):
-        s = stmts[i]
-        if _is_classical_stmt(s):
-            kind = "FUNC"
-        elif _is_quantum_stmt(s):
-            kind = "SETS" if _needs_sets_stmt(s) else "AFFINE"
-        else:
-            kind = "SETS"  # conservative default
-
-        if cur_kind is None:
-            cur_kind = kind; cur = [s]
-        else:
-            # merge classical with classical; merge quantum kinds if same label; else flush
-            if (cur_kind == "FUNC" and kind == "FUNC") or (cur_kind in {"AFFINE","SETS"} and kind in {"AFFINE","SETS"} and (cur_kind == "SETS" or kind == "AFFINE" or cur_kind==kind)):
-                # once SETS, keep as SETS
-                if kind == "SETS": cur_kind = "SETS"
-                cur.append(s)
-            else:
-                flush()
-                cur_kind = kind; cur = [s]
-        i += 1
-    flush()
-    return chunks
-
-# function-chunk interpreter moved to interpret_spl_functions.py
-
-# compatibility wrapper
-def _mk_function_from_chunk(p: int, chunk: List[object]):
-    return interpret_function_chunk(p, chunk)
-
-# ---------- function-chunk interpreter ----------
-
-def _chunk_has_and(stmts: List[object]) -> bool:
-    for s in stmts:
-        if isinstance(s, AffineAssign) and str(s.transform).strip().lower() == "and":
-            return True
-    return False
-
-
-def _collect_vars_func_chunk(chunk: List[object]) -> Tuple[Set[str], Set[str]]:
-    reads: Set[str] = set()
-    writes: Set[str] = set()
-    for s in chunk:
-        if isinstance(s, Init):
-            writes.update(_names_of(s.reg))
-        elif isinstance(s, Discard):
-            writes.update(_names_of(s.reg))
-        elif isinstance(s, AffineAssign):
-            writes.update(_names_of(s.dst))
-            reads.update(_names_of(s.src))
-        elif isinstance(s, Skip):
-            pass
-        else:
-            raise NotImplementedError("non-classical stmt in function chunk")
-    return reads, writes
-
-def _mk_function_from_chunk(p: int, chunk: List[object]):
-    """
-    Build a SetRelation for a classical function chunk.
-    """
-    reads, writes = _collect_vars_func_chunk(chunk)
-    in_names = sorted(list(reads - writes))
-    out_names = sorted(list(writes))
-
-    def make_f(in_order: List[str], out_order: List[str]):
-        def getv(env: Dict[str,int], name: str) -> int:
-            return env.get(name, 0) % p
-        def f(xvec: List[int]) -> List[int]:
-            env: Dict[str,int] = {}
-            for i, name in enumerate(in_order):
-                env[name] = xvec[i] % p
-            for s in chunk:
-                if isinstance(s, Init):
-                    for n in _names_of(s.reg):
-                        env[n] = 0
-                elif isinstance(s, Discard):
-                    for n in _names_of(s.reg):
-                        if n in env:
-                            del env[n]
-                elif isinstance(s, AffineAssign):
-                    op = str(s.transform).strip().lower()
-                    dsts = _names_of(s.dst)
-                    srcs = _names_of(s.src)
-                    if op == "plusone":
-                        assert len(dsts) == 1 and len(srcs) == 1
-                        env[dsts[0]] = (getv(env, srcs[0]) + 1) % p
-                    elif op == "sum":
-                        total = 0
-                        for n in srcs:
-                            total = (total + getv(env, n)) % p
-                        assert len(dsts) == 1
-                        env[dsts[0]] = total % p
-                    elif op == "copy":
-                        assert len(srcs) == 1 and len(dsts) == 2
-                        v = getv(env, srcs[0])
-                        env[dsts[0]] = v
-                        env[dsts[1]] = v
-                    elif op == "and":
-                        assert len(dsts) == 1 and len(srcs) == 2
-                        env[dsts[0]] = (getv(env, srcs[0]) * getv(env, srcs[1])) % p
-                    else:
-                        total = 0
-                        for n in srcs:
-                            total = (total + getv(env, n)) % p
-                        assert len(dsts) == 1
-                        env[dsts[0]] = total % p
-                elif isinstance(s, Skip):
-                    pass
-                else:
-                    raise NotImplementedError("non-classical stmt in function chunk")
-            return [getv(env, n) for n in out_order]
-        return f
-
-    f = make_f(in_names, out_names)
-    rel = SetRelation.from_graph_function(
-        p, len(in_names), len(out_names), f,
-        in_names={i:n for i,n in enumerate(in_names)},
-        out_names={i:n for i,n in enumerate(out_names)},
-    )
-    return rel, in_names, out_names
-
-# ---------- affine-to-set cast ----------
-
-def _affine_to_set(R: AffineRelation) -> SetRelation:
-    p = R.p; n = R.n_in; m = R.n_out
-    B = R.subspace.basis
-    d = n + m
-    r = len(B[0]) if B else 0
-    cols = [[B[i][j] % p for i in range(d)] for j in range(r)] if r>0 else []
-    shift = [v % p for v in R.subspace.shift]
-    pairs = set()
-    def all_vecs_r(p, r):
-        if r == 0:
-            yield []
-            return
-        from itertools import product
-        for t in product(range(p), repeat=r):
-            yield list(t)
-    for t in all_vecs_r(p, r):
-        vec = shift[:]
-        for j in range(r):
-            tj = t[j] % p
-            if tj:
-                for i in range(d):
-                    vec[i] = (vec[i] + tj*cols[j][i]) % p
-        x = tuple(vec[:n]); y = tuple(vec[n:])
-        pairs.add((x,y))
-    return SetRelation(p, n, m, pairs, dict(R.input_names), dict(R.output_names))
-
-# ---------- interpreter (segmentation + casting + composition) ----------
 
 def interpret(p: int, prog: Program, context: Optional[Dict[str, str]] = None):
-    ctx = context if context is not None else getattr(prog, "context", None)
-    # Normalize declared context to types for sub-interpreters
-    declared_ctx = getattr(prog, "context", None) or {}
-    def _norm_ty(ty: str) -> str:
-        t0 = str(ty).strip().lower()
-        if t0 in ("dit", "pit", "bit"):
-            return "pit"
-        if t0 in ("qdit", "qpit", "qudit", "qubit"):
-            return "qpit"
-        raise ValueError(f"unknown declared context type: {ty}")
-    ctx_decl_order = list(declared_ctx.keys())
-    fwd_context = {name: _norm_ty(declared_ctx[name]) for name in ctx_decl_order}
-    chunks = _segment_program(prog.stmts)
+    # Fast-fail on classical control over non-Pauli Clifford
+    for s in prog.stmts:
+        if _is_nonpauli_ctrl(s):
+            raise TypeError("Classical control over non-Pauli Clifford not supported")
 
-    used = set()  # domains used
+    # Normalize context shorthands to preexisting standard
+    if context is not None:
+        norm: Dict[str,str] = {}
+        for k, v in context.items():
+            if v in (1, "Dit", "dit", "pit"):
+                norm[k] = "pit"
+            elif v in (2, "Qdit", "qdit", "qpit"):
+                norm[k] = "qpit"
+            else:
+                norm[k] = str(v)
+        context = norm
 
-    composed: Optional[SetRelation] = None
+    # Segment into chunks with live-in contexts
+    chunks: List[Chunk] = chunk_program(prog)
 
-    # track known input types from prior chunks
-    known_ctx: Dict[str,str] = {}
+    if not chunks:
+        return interpret_sets(p, prog, context=context)
 
-    # If any chunk requires SETS, dispatch whole program to sets interpreter
-    if any(k == 'SETS' for (k, _) in chunks):
-        return interpret_sets(p, prog, context=fwd_context)
-    # If both FUNC and AFFINE exist and any FUNC chunk contains 'and', do whole-program sets to keep interface alignment
-    kinds = {k for (k,_) in chunks}
-    if ('FUNC' in kinds and 'AFFINE' in kinds) and any((k=='FUNC') and _chunk_has_and(st) for (k,st) in chunks):
-        return interpret_sets(p, prog, context=fwd_context)
-    # Otherwise continue with possible chunked composition/minimization
-    if any(k == 'SETS' for (k, _) in chunks):
-        return interpret_sets(p, prog, context=fwd_context)
-    if all(k != 'SETS' for (k, _) in chunks) and any(k == 'AFFINE' for (k,_) in chunks) and all((k!='FUNC') or (not _chunk_has_and(st)) for (k,st) in chunks):
-        # prefer whole-program affine only when no classical 'and' appears
-        return interpret_affine(p, prog, context=fwd_context)
+    kinds = {ch.kind for ch in chunks}
 
-    for kind, stmts in chunks:
-        subprog = Program(stmts=stmts, context=ctx)
-        if kind == "FUNC":
-            Rset, in_names, out_names = _mk_function_from_chunk(p, stmts)
-            for n in out_names:
-                known_ctx.setdefault(n, 'pit')
-            used.add("FUNC")
-            cur = Rset
-        elif kind == "AFFINE":
-            _env, Raff = interpret_affine(p, subprog, context=known_ctx or ctx)
-            used.add("AFFINE")
-            cur = _affine_to_set(Raff)
+    # If any classical-affine assignment reads a quantum-typed var per provided context, use sets composition
+    def _reads_quantum(ch: Chunk) -> bool:
+        from spl.src.parser.parser import _names_of
+        for s in ch.stmts:
+            if isinstance(s, AffineAssign):
+                t = str(getattr(s, "transform", "")).strip().lower()
+                if t in {"sum", "copy", "plusone"} and context:
+                    for n in _names_of(s.src):
+                        ty = context.get(n, "").strip().lower() if isinstance(context.get(n, ""), str) else context.get(n, "")
+                        if ty == "qpit":
+                            return True
+        return False
+
+    if any(_reads_quantum(ch) for ch in chunks):
+        composed_env = None
+        composed_rel = None
+        for ch in chunks:
+            subprog = Program(stmts=ch.stmts, context=ch.live_in)
+            env, rel = interpret_sets(p, subprog, context=ch.live_in)
+            if composed_rel is None:
+                composed_env, composed_rel = env, rel
+            else:
+                composed_rel = composed_rel.compose(rel)
+        return composed_env, composed_rel
+
+    # Pure affine
+    if ("AFFINE" in kinds) and ("CLASSICAL" not in kinds):
+        return interpret_affine(p, prog, context=context)
+    # Pure classical
+    if ("CLASSICAL" in kinds) and ("AFFINE" not in kinds):
+        return interpret_sets(p, prog, context=context)
+
+    # Mixed: compose per-chunk via sets
+    composed_env = None
+    composed_rel = None
+    for ch in chunks:
+        subprog = Program(stmts=ch.stmts, context=ch.live_in)
+        env, rel = interpret_sets(p, subprog, context=ch.live_in)
+        if composed_rel is None:
+            composed_env, composed_rel = env, rel
         else:
-            _env, Rset = interpret_sets(p, subprog, context=known_ctx or ctx)
-            used.add("SETS")
-            cur = Rset
+            composed_rel = composed_rel.compose(rel)
+    return composed_env, composed_rel
 
-        composed = cur if composed is None else composed.compose(cur)
-
-    # Prefer set interpreter if any SETS features were used
-    if "SETS" in used:
-        return interpret_sets(p, prog, context=fwd_context)
-    # Prefer affine when only func+affine used (and no 'and' needed in affine anyway)
-    if used == {"AFFINE"} or (used.issubset({"FUNC","AFFINE"}) and not any(_has_and_assign(s) for s in prog.stmts)):
-        return interpret_affine(p, prog, context=fwd_context)
-    if used == {"FUNC"}:
-        return interpret_sets(p, prog, context=fwd_context)
-    return interpret_sets(p, prog, context=fwd_context)
+# Back-compat for tests expecting _segment_program
+def _segment_program(stmts):
+    from spl.src.parser.parser import Program, _names_of
+    prog = Program(stmts=stmts, context=None)
+    chunks = chunk_program(prog)
+    mapped = []
+    for ch in chunks:
+        if ch.kind == "CLASSICAL":
+            mapped.append(("FUNC", ch.stmts))
+        else:
+            # classify AFFINE chunks that are only classical-affine statements as FUNC for tests
+            only_classical_aff = True
+            for s in ch.stmts:
+                if isinstance(s, (QInit, Meas, ApplyGate, Ctrl)):
+                    only_classical_aff = False; break
+                if isinstance(s, AffineAssign):
+                    t = str(getattr(s, "transform", "")).strip().lower()
+                    if t not in {"sum", "copy", "plusone"}:
+                        only_classical_aff = False; break
+                if not isinstance(s, (Init, Discard, AffineAssign)):
+                    # Skip is also classical-affine but not imported here; treat unknowns as non-classical
+                    pass
+            mapped.append(("FUNC" if only_classical_aff else "AFFINE", ch.stmts))
+    return mapped

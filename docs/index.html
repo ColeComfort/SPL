@@ -16,6 +16,8 @@
       .spacer{flex:1}
       #toast{position:fixed;right:16px;bottom:16px;padding:10px 12px;border:1px solid #ccc;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.15);display:none}
       label{display:inline-flex;align-items:center;gap:6px}
+      #status{margin-left:8px}
+      button[disabled]{opacity:.55; cursor:not-allowed}
     </style>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.26.3/full/pyodide.js"></script>
   </head>
@@ -24,8 +26,9 @@
 
     <div class="row">
       <label>Prime p: <input id="prime" type="number" value="2" min="2" step="1" /></label>
-      <button id="run">Run</button>
-      <button id="load-teleport">Load teleportation</button>
+      <button id="run" disabled>Run</button>
+      <button id="load-teleport" disabled>Load teleportation</button>
+      <span id="status" class="muted">booting…</span>
       <span class="spacer"></span>
       <span id="version" class="muted"></span>
     </div>

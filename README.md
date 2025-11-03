@@ -61,7 +61,7 @@ MUL_k                  % parameter k for dilation (k in 𝔽_p^×)
 
 ### Classical transforms
 ```
-y1,y2 = copy * x       % 1→2
+(y1,y2) = copy * x       % 1→2
 z    = sum  * (u,v)    % 2→1
 x    = plusone * x     % in-place increment mod p
 t    = and * (u,v)     % 2→1, non-affine → set backend

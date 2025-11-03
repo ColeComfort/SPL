@@ -6,7 +6,7 @@ SPL is an environment consuming assembly language for Clifford operations, with 
 
 Affine classical control is efficient, but nonlinear classical control is not.
 
-When nonlinear operations are not used, this produces relation which uniquely determines a completely positive trace-preserving map between finite-dimensional C*-algebras.  Otherwise, this produces a set relation which determines the *possible* Puali measurement outcomes.
+When nonlinear operations are not used, this produces relation which uniquely determines a completely positive trace-preserving map between finite-dimensional C*-algebras.  Otherwise, this produces a set relation which determines the *possible* Pauli measurement outcomes.
 
 > SPL++ is a separate high-level language with its own syntax. SPL++ compiles into SPL code. Experimental and not well-tested.
 
@@ -81,7 +81,7 @@ ctrlZ c t              % classically controlled Pauli X from classical register 
 ctrl P c t             % classically controlled Pauli P from classical register c onto quantum register t, where P ∈ {Z, X}
 ```
 
-Classically controlled operations do not consume the classical register.
+Classically controlled operations do not consume the classical register. They must be applied to existing classical registers.
 
 Measurement consumes the quantum register and makes it classical.
 

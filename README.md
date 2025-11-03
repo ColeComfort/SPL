@@ -24,7 +24,10 @@ When nonlinear operations are not used, this produces relation which uniquely de
 
 SPL statements can be delimited using semicolons:
 
-### Program
+### Program Structure
+
+Spl programs consist of an optional context followed by statements delimited by semicolons:
+
 ```spl
 context { a: pit; q: qpit } 
 stmt; stmt; ...
@@ -32,7 +35,6 @@ stmt; stmt; ...
 
 Or using newlines:
 
-### Program
 ```spl
 context { a: pit
           q: qpit } 
@@ -42,12 +44,13 @@ stmt
 ```
 
 ### Context
+
 Context is optional and is declared by 
 ```spl
 context { ... }
 ```
 
-The context consists of a list of variables with their types, ie.  `a: pit` or `q: qpit` delimited by semicolones or newlines.
+The context consists of a list of variables with their types, ie.  `a: pit` or `q: qpit` delimited by semicolons or newlines.
 
 ### Quantum operations
 ```spl

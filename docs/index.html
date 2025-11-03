@@ -5,7 +5,8 @@
     <title>SPL Online</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-      body{max-width:980px;margin:24px auto;font-family:system-ui,Arial,sans-serif}
+      :root { --maxw: 980px }
+      body{max-width:var(--maxw);margin:24px auto;font-family:system-ui,Arial,sans-serif}
       textarea{width:100%;height:260px}
       pre{white-space:pre-wrap;border:1px solid #ccc;padding:12px;min-height:160px}
       button{padding:8px 16px}
@@ -31,6 +32,7 @@
     <pre id="out" aria-live="polite"></pre>
 
     <div id="toast" role="status" aria-live="assertive"></div>
+
     <script type="module" src="./app.js"></script>
   </body>
 </html>

@@ -1,4 +1,4 @@
-// docs/app.js — minimal, uses embedded runner inside spl-run.pyz
+// Minimal SPL web frontend using embedded runner inside spl-run.pyz
 
 const outEl     = document.getElementById("out");
 const srcEl     = document.getElementById("src");
@@ -62,7 +62,7 @@ if "/spl-run.pyz" not in sys.path:
       toast("Could not load teleportation example.", 5000);
     }
   } catch (e) {
-    if (outEl) outEl.textContent = "Boot failed:\n" + e.message;
+    if (outEl) outEl.textContent = "Boot failed:\\n" + e.message;
     toast("Boot failed. See Output.", 6000);
   }
 }
@@ -79,7 +79,7 @@ run_spl(${codeJSON})
     outEl.textContent = String(result);
     toast("Program ran.", 2000);
   } catch (e) {
-    outEl.textContent = "Error running program:\n" + e.message;
+    outEl.textContent = "Error running program:\\n" + e.message;
     toast("Run failed.", 6000);
   }
 };

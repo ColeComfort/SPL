@@ -4,9 +4,6 @@ This repository provides an implementation of the language and denotational sema
 
 SPL is an environment consuming assembly language for Clifford operations, with classically controlled Pauli operations, Pauli basis state preparation, and classical control.
 
-Try it online:
-https://colecomfort.github.io/SPL/
-
 Affine classical control is efficient, but nonlinear classical control is not.
 
 When nonlinear operations are not used, this produces relation which uniquely determines a completely positive trace-preserving map between finite-dimensional C*-algebras.  Otherwise, this produces a set relation which determines the *possible* Pauli measurement outcomes.

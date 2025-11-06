@@ -85,12 +85,7 @@ Classically controlled operations do not consume the classical register. They mu
 
 Measurement consumes the quantum register and makes it classical.
 
-### Experimental classical controlled clifford
-```spl
-ctrl G c t             % Classically controlled clifford where G ∈ {S, F, T, CX}. NONLINEAR and slow to interpret
-```
-
-### Classical operations
+### Classical affine operations
 ```spl
 skip                      % nothing operation
 init x                    % initialise classical register x with value 0
@@ -98,8 +93,13 @@ disc x                    % discard classical register x
 (y,z)   = copy * x        % copies register x into registers y and z
 z       = sum  * (x,y)    % sums registers x and y into register z
 y       = plusone * x     % sets register y to x+1 mod p
+```
+
+### Classical nonlinear operations
+```spl
 z       = and * (x,y)     % sets register z to the product of registers x and y. NONLINEAR and slow to interpret
 ```
+
 
 Classical operations consume classical input registers and produce new classical registers
 

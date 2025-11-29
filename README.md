@@ -8,8 +8,6 @@ Affine classical control is efficient, but nonlinear classical control is not.
 
 When nonlinear operations are not used, this produces relation which uniquely determines a completely positive trace-preserving map between finite-dimensional C*-algebras.  Otherwise, this produces a set relation which determines the *possible* Pauli measurement outcomes.
 
-> SPL++ is a separate high-level language with its own syntax. SPL++ compiles into SPL code. Experimental and not well-tested.
-
 ## SPL model
 
 - Field: prime field F_p selected by the interpreter.
@@ -136,69 +134,6 @@ disc x
 
 This is interpreted as identity relation from `in` to `out`.
 
----
-
-## Compilation pipeline
-
-High level to low level to semantics:
-
-1. **SPL++** source. High-level functions, types, and controls (EXPERIMENTAL AND NOT WELL-TESTED).
-2. **Compiler** lowers **SPL++** to **SPL**.
-3. **Interpreter** transforms SPL programs into relations. Needs to be provided with a prime number for the dimension.
-   - Uses the **Affine** backend if every classical operation is affine.
-   - If there are a mix of affine and nonlinear operations, the interpreter chunks SPL code into segments consisting of affine relations, and set functions. Then the chunks are interpreted separately. If there are affine chunks and nonlinear functions mixed together, they are cast into set relations then composed as set-relations. The goal is to minimize set relation composition to lower the computational complexity.
-
-Outcome: an relation and a dictionary indexing the input and output registers.  Quantum registers `a` are split in two `a.x` and `a.z`. Classical registers names are unchanged. The domain is fixed by the SPL `context`. The range is inferred.
-
----
-
-# SPL++
-
-SPL++ is an **experimental**, not-well-tested,  **high-level** language with functions, kinds, control, and a compiler that lowers programs to SPL.
-
-## SPL++ example: Teleportation
-
-```spl++
-dim 3;
-
-// Prepare a Bell pair |Φ+> from |0,0>
-@Linear fn prepare_bell() -> Qdit, Qdit {
-    qinit qb;
-    qinit qc;
-    apply F(qb);
-    apply CX(qb, qc);
-    return qb, qc;
-}
-
-// Bell-basis measurement on (qa, qb); returns classical dits (m0, m1)
-@Linear fn bell_measure(qa: Qdit, qb: Qdit) -> Dit, Dit {
-    apply CX(qa, qb);
-    apply F(qa);
-    meas qa;
-    meas qb;
-    return qa, qb;
-}
-
-// Classically controlled Pauli corrections on target
-@Linear fn pauli_correct(m0: Dit, m1: Dit, out: Qdit) -> Qdit {
-    cctrl m0: apply X(out);
-    cctrl m1: apply Z(out);
-    return out;
-}
-
-// Teleport 'in' to 'out'
-@Linear fn teleport(in: Qdit) -> Qdit {
-    apply prepare_bell() -> qb, qc;
-    apply bell_measure(in, qb) -> m0, m1;
-    apply pauli_correct(m0, m1, qc) -> out;
-    return out;
-}
-
-// Driver: print SPL for teleport
-fn main() {
-    print spl teleport;
-}
-```
 
 ## Build and run
 
